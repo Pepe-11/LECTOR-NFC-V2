@@ -3,78 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nexo de Validación NFC</title>
+    <title>Acceso Inteligente NFC</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-white flex items-center justify-center min-h-screen">
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center p-4">
 
-    <div id="loading" class="text-center">
-        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
-        <p class="mt-4 text-gray-400">Verificando credenciales...</p>
-    </div>
+    <div id="auth-card" class="bg-white text-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
+        <h2 id="auth-title" class="text-2xl font-bold mb-6 text-center text-blue-600">Identificación</h2>
+        
+        <div id="step-1">
+            <input type="text" id="user-input" placeholder="Introduce tu usuario" class="w-full border-2 p-3 rounded-lg mb-4 outline-blue-500">
+            <button onclick="verificarUsuario()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700">Continuar</button>
+        </div>
 
-    <div id="login-screen" class="hidden bg-white text-slate-900 p-8 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
-        <h2 class="text-2xl font-bold mb-2 text-center">Identificación</h2>
-        <p class="text-sm text-gray-500 mb-6 text-center">Escanee un punto o inicie sesión</p>
-        
-        <input type="text" id="user-input" placeholder="Usuario" class="w-full border p-3 rounded mb-4 outline-blue-500">
-        <input type="password" id="pass-input" placeholder="Contraseña" class="w-full border p-3 rounded mb-6 outline-blue-500">
-        
-        <button onclick="intentarLogin()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition">
-            Acceder al Sistema
-        </button>
+        <div id="step-login" class="hidden text-center">
+            <p class="mb-4 text-gray-600">Bienvenido de nuevo, <span id="display-name" class="font-bold"></span></p>
+            <input type="password" id="pass-login" placeholder="Contraseña" class="w-full border-2 p-3 rounded-lg mb-4">
+            <button onclick="loginFinal()" class="w-full bg-emerald-500 text-white font-bold py-3 rounded-lg">Entrar</button>
+        </div>
+
+        <div id="step-register" class="hidden">
+            <p class="mb-4 text-orange-600 text-sm font-semibold">Usuario no encontrado. Regístrate:</p>
+            <input type="password" id="pass-reg" placeholder="Crea una contraseña" class="w-full border-2 p-3 rounded-lg mb-4">
+            <input type="text" id="extra-info" placeholder="Nombre completo" class="w-full border-2 p-3 rounded-lg mb-6">
+            <button onclick="registrarNuevo()" class="w-full bg-orange-500 text-white font-bold py-3 rounded-lg">Crear Cuenta</button>
+        </div>
+
+        <div id="loader" class="hidden mt-4 text-center animate-pulse text-blue-500 font-bold">Procesando...</div>
     </div>
 
     <script>
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxI-Hd40ACG6oYIInX6xGmYufB5XuEO2SgbcPeSfiN7dYaqjrm6K-ssmF4TOfOmOQDiQQ/exec"; 
-        const URL_WEB_TAREAS = "https://tu-sitio-web-de-tareas.com"; // <--- TU URL FINAL AQUÍ
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziQAC8bDHI8fHYHx1pp_0TjB4NyWt6cci7YxFgBohPW6Rg7rnnx9LJU6Rf-Rqsz2HpcQ/exec";
+        let tempUser = "";
+        let correctPass = "";
 
-        // 1. Al cargar, comprobamos si ya hay una sesión guardada en el móvil
-        window.onload = function() {
-            const sessionActive = localStorage.getItem('user_authenticated');
-            const params = new URLSearchParams(window.location.search);
-            const puntoID = params.get('punto'); // Captura el ID del NFC
+        async function verificarUsuario() {
+            tempUser = document.getElementById('user-input').value.trim();
+            if(!tempUser) return alert("Escribe un usuario");
 
-            if (sessionActive === 'true') {
-                // SI ESTÁ LOGUEADO: Registrar en Sheets y redirigir
-                registrarYRedirigir(localStorage.getItem('user_name'), puntoID);
-            } else {
-                // NO ESTÁ LOGUEADO: Mostrar login
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('login-screen').classList.remove('hidden');
-            }
-        };
+            mostrarLoader(true);
+            
+            try {
+                // Consultamos al Google Sheet si el usuario existe
+                const res = await fetch(`${SCRIPT_URL}?user=${tempUser}`);
+                const data = await res.json();
 
-        function intentarLogin() {
-            const user = document.getElementById('user-input').value;
-            const pass = document.getElementById('pass-input').value;
+                document.getElementById('step-1').classList.add('hidden');
+                mostrarLoader(false);
 
-            if (user && pass === "1234") {
-                // Guardar sesión en el navegador del móvil (no se borra al cerrar)
-                localStorage.setItem('user_authenticated', 'true');
-                localStorage.setItem('user_name', user);
-                
-                const params = new URLSearchParams(window.location.search);
-                registrarYRedirigir(user, params.get('punto') || "Login Manual");
-            } else {
-                alert("Credenciales incorrectas");
+                if(data.exists) {
+                    // SI EXISTE
+                    document.getElementById('step-login').classList.remove('hidden');
+                    document.getElementById('display-name').innerText = tempUser;
+                    correctPass = data.pass;
+                    document.getElementById('auth-title').innerText = "Iniciar Sesión";
+                } else {
+                    // NO EXISTE
+                    document.getElementById('step-register').classList.remove('hidden');
+                    document.getElementById('auth-title').innerText = "Nuevo Registro";
+                }
+            } catch (e) {
+                alert("Error de conexión");
+                mostrarLoader(false);
             }
         }
 
-        function registrarYRedirigir(usuario, punto) {
-            // Enviamos a Google Sheets para dejar constancia de la lectura física
-            fetch(SCRIPT_URL, {
+        async function registrarNuevo() {
+            const pass = document.getElementById('pass-reg').value;
+            const info = document.getElementById('extra-info').value;
+
+            if(!pass || !info) return alert("Rellena todos los campos");
+
+            // Guardar en Google Sheets (POST)
+            await fetch(SCRIPT_URL, {
                 method: "POST",
-                mode: "no-cors",
                 body: JSON.stringify({
-                    usuario: usuario,
-                    accion: "Lectura NFC - Redirección",
-                    id_tarjeta: punto
+                    usuario: tempUser,
+                    password: pass,
+                    accion: "REGISTRO NUEVO: " + info
                 })
-            }).then(() => {
-                // Redirigir a la web de tareas con el ID del punto para que la web sepa qué tarea mostrar
-                window.location.href = URL_WEB_TAREAS + "?punto=" + punto;
             });
+
+            alert("Cuenta creada. Ya puedes entrar.");
+            location.reload();
+        }
+
+        function loginFinal() {
+            const pass = document.getElementById('pass-login').value;
+            if(pass === correctPass.toString()) {
+                localStorage.setItem('user_authenticated', 'true');
+                localStorage.setItem('user_name', tempUser);
+                alert("Acceso concedido");
+                // Aquí rediriges a tu URL final de tareas
+                window.location.href = "https://tu-url-de-tareas.com?user=" + tempUser;
+            } else {
+                alert("Contraseña incorrecta");
+            }
+        }
+
+        function mostrarLoader(show) {
+            document.getElementById('loader').classList.toggle('hidden', !show);
         }
     </script>
 </body>
