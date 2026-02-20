@@ -3,118 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vigilancia NFC + Google Sheets</title>
+    <title>Nexo de Validación NFC</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 font-sans text-white">
+<body class="bg-slate-900 text-white flex items-center justify-center min-h-screen">
 
-    <div id="login-screen" class="fixed inset-0 bg-slate-900 flex items-center justify-center z-50 p-6">
-        <div class="bg-white text-slate-900 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
-            <h2 class="text-2xl font-bold mb-6 text-center">Acceso Vigilante</h2>
-            <input type="text" id="user-input" placeholder="Nombre de Usuario" class="w-full border p-3 rounded mb-4 outline-blue-500">
-            <input type="password" id="pass-input" placeholder="Contraseña" class="w-full border p-3 rounded mb-6 outline-blue-500">
-            <button onclick="login()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition">Entrar</button>
-        </div>
+    <div id="loading" class="text-center">
+        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
+        <p class="mt-4 text-gray-400">Verificando credenciales...</p>
     </div>
 
-    <div id="main-panel" class="hidden">
-        <nav class="bg-blue-700 p-4 shadow-md flex justify-between items-center">
-            <h1 class="font-bold uppercase tracking-wider">Control NFC</h1>
-            <span id="display-user" class="text-xs bg-blue-900 px-2 py-1 rounded"></span>
-        </nav>
-
-        <div class="p-6 max-w-md mx-auto">
-            <div id="session-card" class="bg-slate-800 rounded-xl p-5 mb-6 border-l-4 border-red-500 shadow-xl">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p class="text-gray-400 text-xs font-bold uppercase">Estado</p>
-                        <p id="session-status" class="text-red-500 font-bold">LECTURA PENDIENTE</p>
-                    </div>
-                    <div id="timer" class="text-2xl font-mono font-bold">00:00</div>
-                </div>
-            </div>
-
-            <button onclick="simularLecturaNFC()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 px-4 rounded-xl shadow-lg mb-8 transition-transform active:scale-95 flex items-center justify-center gap-3">
-                <span>📳</span> ESCANEAR PUNTO NFC
-            </button>
-
-            <div id="tasks-container" class="space-y-4 opacity-30 pointer-events-none transition-opacity duration-500">
-                <h3 class="font-bold text-gray-400">Tareas disponibles:</h3>
-                <div class="bg-slate-800 p-4 rounded-lg flex items-center justify-between border border-slate-700">
-                    <span>Revisar Luces Planta 1</span>
-                    <input type="checkbox" class="w-6 h-6" onchange="enviarDatosASheets('Tarea: Luces Planta 1')">
-                </div>
-            </div>
-        </div>
+    <div id="login-screen" class="hidden bg-white text-slate-900 p-8 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+        <h2 class="text-2xl font-bold mb-2 text-center">Identificación</h2>
+        <p class="text-sm text-gray-500 mb-6 text-center">Escanee un punto o inicie sesión</p>
+        
+        <input type="text" id="user-input" placeholder="Usuario" class="w-full border p-3 rounded mb-4 outline-blue-500">
+        <input type="password" id="pass-input" placeholder="Contraseña" class="w-full border p-3 rounded mb-6 outline-blue-500">
+        
+        <button onclick="intentarLogin()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition">
+            Acceder al Sistema
+        </button>
     </div>
 
     <script>
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxI-Hd40ACG6oYIInX6xGmYufB5XuEO2SgbcPeSfiN7dYaqjrm6K-ssmF4TOfOmOQDiQQ/exec"; // <--- PEGA TU URL AQUÍ
-        let currentUser = "";
-        let timeLeft = 0;
-        let countdown;
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxI-Hd40ACG6oYIInX6xGmYufB5XuEO2SgbcPeSfiN7dYaqjrm6K-ssmF4TOfOmOQDiQQ/exec"; 
+        const URL_WEB_TAREAS = "https://tu-sitio-web-de-tareas.com"; // <--- TU URL FINAL AQUÍ
 
-        function login() {
+        // 1. Al cargar, comprobamos si ya hay una sesión guardada en el móvil
+        window.onload = function() {
+            const sessionActive = localStorage.getItem('user_authenticated');
+            const params = new URLSearchParams(window.location.search);
+            const puntoID = params.get('punto'); // Captura el ID del NFC
+
+            if (sessionActive === 'true') {
+                // SI ESTÁ LOGUEADO: Registrar en Sheets y redirigir
+                registrarYRedirigir(localStorage.getItem('user_name'), puntoID);
+            } else {
+                // NO ESTÁ LOGUEADO: Mostrar login
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('login-screen').classList.remove('hidden');
+            }
+        };
+
+        function intentarLogin() {
             const user = document.getElementById('user-input').value;
             const pass = document.getElementById('pass-input').value;
-            
-            if(user && pass === "1234") { // Contraseña simple de ejemplo
-                currentUser = user;
-                document.getElementById('display-user').innerText = "👤 " + user;
-                document.getElementById('login-screen').classList.add('hidden');
-                document.getElementById('main-panel').classList.remove('hidden');
-                enviarDatosASheets("Inicio de Sesión");
+
+            if (user && pass === "1234") {
+                // Guardar sesión en el navegador del móvil (no se borra al cerrar)
+                localStorage.setItem('user_authenticated', 'true');
+                localStorage.setItem('user_name', user);
+                
+                const params = new URLSearchParams(window.location.search);
+                registrarYRedirigir(user, params.get('punto') || "Login Manual");
             } else {
-                alert("Usuario o contraseña incorrectos");
+                alert("Credenciales incorrectas");
             }
         }
 
-        function simularLecturaNFC() {
-            timeLeft = 600; // 10 min
-            document.getElementById('session-status').innerText = "ACCESO CONCEDIDO";
-            document.getElementById('session-status').classList.replace('text-red-500', 'text-emerald-400');
-            document.getElementById('session-card').classList.replace('border-red-500', 'border-emerald-500');
-            document.getElementById('tasks-container').style.opacity = "1";
-            document.getElementById('tasks-container').style.pointerEvents = "auto";
-            
-            clearInterval(countdown);
-            actualizarReloj();
-            countdown = setInterval(actualizarReloj, 1000);
-            
-            enviarDatosASheets("Escaneo NFC Realizado", "TAG_ALMACEN_01");
-        }
-
-        function actualizarReloj() {
-            const min = Math.floor(timeLeft / 60);
-            const seg = timeLeft % 60;
-            document.getElementById('timer').innerText = `${min.toString().padStart(2,'0')}:${seg.toString().padStart(2,'0')}`;
-            if (timeLeft <= 0) bloquear();
-            timeLeft--;
-        }
-
-        function bloquear() {
-            clearInterval(countdown);
-            document.getElementById('tasks-container').style.opacity = "0.3";
-            document.getElementById('tasks-container').style.pointerEvents = "none";
-            document.getElementById('session-status').innerText = "SESIÓN EXPIRADA";
-            document.getElementById('session-status').classList.replace('text-emerald-400', 'text-red-500');
-        }
-
-        function enviarDatosASheets(accion, id_tarjeta = "N/A") {
-            const data = {
-                usuario: currentUser,
-                accion: accion,
-                id_tarjeta: id_tarjeta
-            };
-
+        function registrarYRedirigir(usuario, punto) {
+            // Enviamos a Google Sheets para dejar constancia de la lectura física
             fetch(SCRIPT_URL, {
                 method: "POST",
-                mode: "no-cors", // Necesario para Google Apps Script
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
+                mode: "no-cors",
+                body: JSON.stringify({
+                    usuario: usuario,
+                    accion: "Lectura NFC - Redirección",
+                    id_tarjeta: punto
+                })
             }).then(() => {
-                console.log("Datos enviados a Google Sheets");
-            }).catch(err => console.error(err));
+                // Redirigir a la web de tareas con el ID del punto para que la web sepa qué tarea mostrar
+                window.location.href = URL_WEB_TAREAS + "?punto=" + punto;
+            });
         }
     </script>
 </body>
