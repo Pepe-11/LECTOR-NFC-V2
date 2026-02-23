@@ -673,6 +673,8 @@
 
         clearInterval(sessionInterval);
 
+        let pollCounter = 0;
+        
         sessionInterval = setInterval(() => {
             const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
             sessionSeconds = remaining;
@@ -698,6 +700,25 @@
 
             if (remaining <= 0) {
                 cerrarSesion(true);
+                return;
+            }
+
+            pollCounter++;
+            if (pollCounter % 20 === 0) {
+                const username = localStorage.getItem('user_name');
+                try {
+                    const res  = await fetch(`${SCRIPT_URL}?action=list_users`);
+                    const data = await res.json();
+                    const user = (data.users || []).find(u => u.usuario === username);
+                    if (user && user.sesion_activa !== 'SI') {
+                        // Sesión revocada desde el Sheet
+                        localStorage.removeItem('user_authenticated');
+                        localStorage.removeItem('user_name');
+                        localStorage.removeItem('session_expiry');
+                        showToast('warn', 'Sesión cerrada remotamente.');
+                        setTimeout(() => location.reload(), 1800);
+                    }
+                } catch(e) { /* silencioso: no cortar sesión por error de red */ }
             }
         }, 1000);
     }
