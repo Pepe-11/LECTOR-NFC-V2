@@ -606,6 +606,7 @@
                 <label>Contraseña</label>
                 <input type="password" id="pass-reg" placeholder="Crea una contraseña" autocomplete="new-password">
             </div>
+
             <button class="btn btn-warn" onclick="registrarNuevo()">Crear cuenta</button>
             <button class="btn btn-outline" onclick="goBack()">← Volver</button>
         </div>
@@ -673,9 +674,10 @@
 
         clearInterval(sessionInterval);
 
+        // Cada 20 ticks (20 seg) consulta el Sheet para detectar revocación remota
         let pollCounter = 0;
-        
-        sessionInterval = setInterval(() => {
+
+        sessionInterval = setInterval(async () => {
             const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
             sessionSeconds = remaining;
 
@@ -690,9 +692,7 @@
 
             // Warning style at <2 min
             const info = document.getElementById('session-info');
-            if (remaining < 120) {
-                info.classList.add('warning');
-            }
+            if (remaining < 120) info.classList.add('warning');
 
             if (remaining === 60) {
                 showToast('warn', '⚠ Tu sesión expirará en 1 minuto');
@@ -703,6 +703,7 @@
                 return;
             }
 
+            // Polling cada 20 segundos al Sheet
             pollCounter++;
             if (pollCounter % 20 === 0) {
                 const username = localStorage.getItem('user_name');
@@ -748,15 +749,36 @@
         } catch (e) { /* silencioso */ }
     }
 
-    function verificarSesionActiva() {
+    async function verificarSesionActiva() {
         const expiry = parseInt(localStorage.getItem('session_expiry') || '0');
-        const auth = localStorage.getItem('user_authenticated');
-        if (auth && expiry && Date.now() < expiry) {
-            // Session still valid, redirect
-            window.location.href = "https://soporteapp.gcalidad.com";
-        } else if (auth) {
-            // Expired, clean up
+        const auth   = localStorage.getItem('user_authenticated');
+        const username = localStorage.getItem('user_name');
+
+        // Sin sesión local → mostrar login normalmente
+        if (!auth || !username) return;
+
+        // Sesión local caducada → limpiar y mostrar login
+        if (!expiry || Date.now() >= expiry) {
             localStorage.clear();
+            return;
+        }
+
+        // Sesión local válida → verificar también contra el Sheet
+        try {
+            const res  = await fetch(`${SCRIPT_URL}?action=list_users`);
+            const data = await res.json();
+            const user = (data.users || []).find(u => u.usuario === username);
+
+            if (user && user.sesion_activa === 'SI') {
+                // Sheet confirma sesión activa → redirigir
+                window.location.href = "https://soporteapp.gcalidad.com";
+            } else {
+                // Sheet dice NO o usuario no encontrado → limpiar y mostrar login
+                localStorage.clear();
+            }
+        } catch(e) {
+            // Error de red: confiar en localStorage como fallback
+            window.location.href = "https://soporteapp.gcalidad.com";
         }
     }
 
@@ -789,14 +811,13 @@
 
     async function registrarNuevo() {
         const pass = document.getElementById('pass-reg').value;
-        const info = document.getElementById('extra-info').value;
-        if (!pass || !info) return showToast('error', 'Rellena todos los campos');
+        if (!pass) return showToast('error', 'Introduce una contraseña');
 
         mostrarLoader(true);
         try {
             await fetch(SCRIPT_URL, {
                 method: "POST",
-                body: JSON.stringify({ usuario: tempUser, password: pass, accion: "REGISTRO NUEVO: " + info })
+                body: JSON.stringify({ usuario: tempUser, password: pass, accion: "REGISTRO NUEVO" })
             });
             showToast('success', '✓ Cuenta creada correctamente');
             setTimeout(() => location.reload(), 1800);
