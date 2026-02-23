@@ -4,106 +4,926 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Acceso Inteligente NFC</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center p-4">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e1a;
+            --surface: #111827;
+            --surface2: #1a2235;
+            --accent: #00d4ff;
+            --accent2: #7c3aed;
+            --warn: #f59e0b;
+            --danger: #ef4444;
+            --success: #10b981;
+            --text: #e2e8f0;
+            --muted: #64748b;
+            --border: rgba(0, 212, 255, 0.15);
+        }
 
-    <div id="auth-card" class="bg-white text-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
-        <h2 id="auth-title" class="text-2xl font-bold mb-6 text-center text-blue-600">Identificación</h2>
-        
-        <div id="step-1">
-            <input type="text" id="user-input" placeholder="Introduce tu usuario" class="w-full border-2 p-3 rounded-lg mb-4 outline-blue-500">
-            <button onclick="verificarUsuario()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700">Continuar</button>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Syne', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: 
+                radial-gradient(ellipse 60% 40% at 20% 20%, rgba(0,212,255,0.06) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 50% at 80% 80%, rgba(124,58,237,0.07) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        /* GRID PATTERN */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: 
+                linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+        }
+
+        /* ── LAYOUT ── */
+        .app-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 900px;
+            position: relative;
+            z-index: 1;
+        }
+
+        @media(min-width: 768px) {
+            .app-container.has-panel {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        /* ── CARD ── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2.5rem 2rem;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 60px rgba(0,212,255,0.04), 0 20px 40px rgba(0,0,0,0.4);
+            animation: cardIn 0.5s cubic-bezier(.4,0,.2,1);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.6;
+        }
+
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(24px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── BRAND ── */
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 2rem;
+        }
+
+        .brand-icon {
+            width: 42px; height: 42px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem;
+            box-shadow: 0 0 20px rgba(0,212,255,0.3);
+        }
+
+        .brand-text {
+            font-size: 0.7rem;
+            font-family: 'Space Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--muted);
+        }
+
+        .brand-name {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--accent);
+            letter-spacing: -0.02em;
+            line-height: 1;
+        }
+
+        /* ── TITLE ── */
+        .auth-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            margin-bottom: 0.4rem;
+            background: linear-gradient(135deg, #fff 60%, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .auth-subtitle {
+            font-size: 0.8rem;
+            color: var(--muted);
+            font-family: 'Space Mono', monospace;
+            margin-bottom: 2rem;
+        }
+
+        /* ── INPUTS ── */
+        .field {
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .field label {
+            display: block;
+            font-size: 0.72rem;
+            font-family: 'Space Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .field input {
+            width: 100%;
+            background: var(--surface2);
+            border: 1px solid rgba(100,116,139,0.3);
+            border-radius: 10px;
+            padding: 0.85rem 1rem;
+            color: var(--text);
+            font-family: 'Syne', sans-serif;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .field input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,212,255,0.1);
+        }
+
+        .field input::placeholder { color: var(--muted); }
+
+        /* ── BUTTONS ── */
+        .btn {
+            width: 100%;
+            padding: 0.9rem 1.5rem;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 0.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: white;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .btn:hover::after { opacity: 0.06; }
+        .btn:active { transform: scale(0.98); }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #0099bb);
+            color: #000;
+            box-shadow: 0 4px 20px rgba(0,212,255,0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--success), #059669);
+            color: #fff;
+            box-shadow: 0 4px 20px rgba(16,185,129,0.3);
+        }
+
+        .btn-warn {
+            background: linear-gradient(135deg, var(--warn), #d97706);
+            color: #000;
+            box-shadow: 0 4px 20px rgba(245,158,11,0.3);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid rgba(100,116,139,0.4);
+            color: var(--muted);
+            margin-top: 0.75rem;
+            font-size: 0.72rem;
+        }
+
+        /* ── LOADER ── */
+        .loader {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1.2rem;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--accent);
+        }
+
+        .loader.active { display: flex; }
+
+        .loader-dots span {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            animation: bounce 1.2s ease-in-out infinite;
+        }
+
+        .loader-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loader-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ── WELCOME PILL ── */
+        .welcome-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(16,185,129,0.1);
+            border: 1px solid rgba(16,185,129,0.25);
+            border-radius: 100px;
+            padding: 0.4rem 0.9rem;
+            font-size: 0.8rem;
+            color: var(--success);
+            margin-bottom: 1.5rem;
+        }
+
+        .welcome-pill::before {
+            content: '';
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ── REGISTER NOTICE ── */
+        .notice {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            background: rgba(245,158,11,0.08);
+            border: 1px solid rgba(245,158,11,0.2);
+            border-radius: 8px;
+            padding: 0.7rem 0.9rem;
+            font-size: 0.78rem;
+            color: var(--warn);
+            margin-bottom: 1.5rem;
+        }
+
+        /* ── USERS PANEL ── */
+        .panel-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2rem 1.75rem;
+            box-shadow: 0 0 60px rgba(124,58,237,0.04), 0 20px 40px rgba(0,0,0,0.4);
+            animation: cardIn 0.5s 0.15s cubic-bezier(.4,0,.2,1) both;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .panel-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent2), transparent);
+            opacity: 0.6;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+        }
+
+        .panel-title {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .panel-badge {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.65rem;
+            background: rgba(124,58,237,0.2);
+            border: 1px solid rgba(124,58,237,0.3);
+            color: #a78bfa;
+            padding: 0.25rem 0.6rem;
+            border-radius: 100px;
+        }
+
+        .user-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            max-height: 340px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+
+        .user-list::-webkit-scrollbar { width: 4px; }
+        .user-list::-webkit-scrollbar-track { background: transparent; }
+        .user-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--surface2);
+            border: 1px solid rgba(100,116,139,0.15);
+            border-radius: 10px;
+            padding: 0.7rem 0.9rem;
+            animation: fadeSlide 0.3s ease both;
+        }
+
+        @keyframes fadeSlide {
+            from { opacity: 0; transform: translateX(-10px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        .user-avatar {
+            width: 34px; height: 34px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.85rem;
+            font-weight: 700;
+            flex-shrink: 0;
+            color: #fff;
+        }
+
+        .user-info { flex: 1; min-width: 0; }
+
+        .user-name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-meta {
+            font-size: 0.68rem;
+            font-family: 'Space Mono', monospace;
+            color: var(--muted);
+            margin-top: 0.1rem;
+        }
+
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 6px var(--success);
+            flex-shrink: 0;
+        }
+
+        .panel-empty {
+            text-align: center;
+            padding: 2.5rem 1rem;
+            color: var(--muted);
+            font-family: 'Space Mono', monospace;
+            font-size: 0.75rem;
+        }
+
+        .panel-empty .empty-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+
+        .refresh-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: none;
+            border: 1px solid rgba(124,58,237,0.3);
+            color: #a78bfa;
+            border-radius: 8px;
+            padding: 0.3rem 0.7rem;
+            font-size: 0.7rem;
+            font-family: 'Space Mono', monospace;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover { background: rgba(124,58,237,0.1); }
+
+        /* ── SESSION TIMER ── */
+        .session-bar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: rgba(0,212,255,0.15);
+            z-index: 100;
+            display: none;
+        }
+
+        .session-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            transition: width 1s linear;
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .session-info {
+            position: fixed;
+            top: 0.6rem; right: 1rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            padding: 0.3rem 0.8rem;
+            font-size: 0.7rem;
+            font-family: 'Space Mono', monospace;
+            color: var(--muted);
+            z-index: 101;
+            display: none;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .session-info.warning { color: var(--danger); border-color: rgba(239,68,68,0.4); }
+        .session-info.warning::before {
+            content: '';
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--danger);
+            animation: pulse 1s infinite;
+            flex-shrink: 0;
+        }
+
+        /* ── TOAST ── */
+        .toast {
+            position: fixed;
+            bottom: 1.5rem; right: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.9rem 1.2rem;
+            font-size: 0.82rem;
+            max-width: 300px;
+            z-index: 200;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(.4,0,.2,1);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { border-color: rgba(16,185,129,0.4); color: var(--success); }
+        .toast.error   { border-color: rgba(239,68,68,0.4); color: var(--danger); }
+        .toast.warn    { border-color: rgba(245,158,11,0.4); color: var(--warn); }
+
+        .users-section-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.62rem;
+            letter-spacing: 0.12em;
+            padding: 0.3rem 0.2rem 0.5rem;
+            margin-top: 0.4rem;
+        }
+
+        .active-label   { color: var(--success); }
+        .inactive-label { color: var(--muted); margin-top: 0.8rem; }
+
+        .user-inactive {
+            opacity: 0.45;
+        }
+
+        .avatar-inactive {
+            background: linear-gradient(135deg, #374151, #4b5563) !important;
+        }
+
+        .dot-inactive {
+            background: var(--muted) !important;
+            box-shadow: none !important;
+            animation: none !important;
+        }
+
+        /* ── UTIL ── */
+        .hidden { display: none !important; }
+        .divider {
+            border: none;
+            border-top: 1px solid rgba(100,116,139,0.15);
+            margin: 1.25rem 0;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Session bar -->
+<div class="session-bar" id="session-bar">
+    <div class="session-bar-fill" id="session-bar-fill"></div>
+</div>
+<div class="session-info" id="session-info">
+    ⏱ Sesión: <span id="session-timer">10:00</span>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<div class="app-container" id="app-container">
+
+    <!-- AUTH CARD -->
+    <div class="card" id="auth-card">
+        <div class="brand">
+            <div class="brand-icon">⬡</div>
+            <div>
+                <div class="brand-text">Sistema de acceso</div>
+                <div class="brand-name">NFC Access</div>
+            </div>
         </div>
 
-        <div id="step-login" class="hidden text-center">
-            <p class="mb-4 text-gray-600">Bienvenido de nuevo, <span id="display-name" class="font-bold"></span></p>
-            <input type="password" id="pass-login" placeholder="Contraseña" class="w-full border-2 p-3 rounded-lg mb-4">
-            <button onclick="loginFinal()" class="w-full bg-emerald-500 text-white font-bold py-3 rounded-lg">Entrar</button>
+        <div id="step-1">
+            <h1 class="auth-title">Identificación</h1>
+            <p class="auth-subtitle">// Introduce tus credenciales</p>
+            <div class="field">
+                <label>Usuario</label>
+                <input type="text" id="user-input" placeholder="nombre_usuario" autocomplete="username">
+            </div>
+            <button class="btn btn-primary" onclick="verificarUsuario()">Continuar →</button>
+        </div>
+
+        <div id="step-login" class="hidden">
+            <div class="welcome-pill" id="display-name-wrap">usuario</div>
+            <h1 class="auth-title">Bienvenido</h1>
+            <p class="auth-subtitle">// Verificación de contraseña</p>
+            <div class="field">
+                <label>Contraseña</label>
+                <input type="password" id="pass-login" placeholder="••••••••" autocomplete="current-password">
+            </div>
+            <button class="btn btn-success" onclick="loginFinal()">Entrar al sistema →</button>
+            <button class="btn btn-outline" onclick="goBack()">← Cambiar usuario</button>
         </div>
 
         <div id="step-register" class="hidden">
-            <p class="mb-4 text-orange-600 text-sm font-semibold">Usuario no encontrado. Regístrate:</p>
-            <input type="password" id="pass-reg" placeholder="Crea una contraseña" class="w-full border-2 p-3 rounded-lg mb-4">
-            <input type="text" id="extra-info" placeholder="Nombre completo" class="w-full border-2 p-3 rounded-lg mb-6">
-            <button onclick="registrarNuevo()" class="w-full bg-orange-500 text-white font-bold py-3 rounded-lg">Crear Cuenta</button>
+            <h1 class="auth-title">Nuevo Registro</h1>
+            <p class="auth-subtitle">// Usuario no encontrado</p>
+            <div class="notice">⚠ Usuario no encontrado en el sistema. Crea tu cuenta.</div>
+            <div class="field">
+                <label>Contraseña</label>
+                <input type="password" id="pass-reg" placeholder="Crea una contraseña" autocomplete="new-password">
+            </div>
+            <div class="field">
+                <label>Nombre completo</label>
+                <input type="text" id="extra-info" placeholder="Nombre Apellido">
+            </div>
+            <button class="btn btn-warn" onclick="registrarNuevo()">Crear cuenta</button>
+            <button class="btn btn-outline" onclick="goBack()">← Volver</button>
         </div>
 
-        <div id="loader" class="hidden mt-4 text-center animate-pulse text-blue-500 font-bold">Procesando...</div>
+        <div class="loader" id="loader">
+            <div class="loader-dots">
+                <span></span><span></span><span></span>
+            </div>
+            Procesando...
+        </div>
+
+        <!-- Toggle panel button -->
+        <hr class="divider">
+        <button class="btn btn-outline" onclick="togglePanel()" id="toggle-panel-btn">
+            👥 Ver usuarios activos
+        </button>
     </div>
 
-    <script>
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziQAC8bDHI8fHYHx1pp_0TjB4NyWt6cci7YxFgBohPW6Rg7rnnx9LJU6Rf-Rqsz2HpcQ/exec";
-        let tempUser = "";
-        let correctPass = "";
+    <!-- USERS PANEL -->
+    <div class="panel-card hidden" id="users-panel">
+        <div class="panel-header">
+            <div class="panel-title">Usuarios activos</div>
+            <button class="refresh-btn" onclick="cargarUsuarios()">
+                ↺ Actualizar
+            </button>
+        </div>
 
-        async function verificarUsuario() {
-            tempUser = document.getElementById('user-input').value.trim();
-            if(!tempUser) return alert("Escribe un usuario");
+        <div class="user-list" id="user-list">
+            <div class="panel-empty">
+                <div class="empty-icon">📡</div>
+                Cargando usuarios...
+            </div>
+        </div>
+        <div id="users-count" style="margin-top:1rem;font-size:0.7rem;font-family:'Space Mono',monospace;color:var(--muted);text-align:right;"></div>
+    </div>
 
-            mostrarLoader(true);
-            
-            try {
-                // Consultamos al Google Sheet si el usuario existe
-                const res = await fetch(`${SCRIPT_URL}?user=${tempUser}`);
-                const data = await res.json();
+</div>
 
-                document.getElementById('step-1').classList.add('hidden');
-                mostrarLoader(false);
+<script>
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziQAC8bDHI8fHYHx1pp_0TjB4NyWt6cci7YxFgBohPW6Rg7rnnx9LJU6Rf-Rqsz2HpcQ/exec";
+    const SESSION_DURATION = 10 * 60; // 10 minutos en segundos
 
-                if(data.exists) {
-                    // SI EXISTE
-                    document.getElementById('step-login').classList.remove('hidden');
-                    document.getElementById('display-name').innerText = tempUser;
-                    correctPass = data.pass;
-                    document.getElementById('auth-title').innerText = "Iniciar Sesión";
-                } else {
-                    // NO EXISTE
-                    document.getElementById('step-register').classList.remove('hidden');
-                    document.getElementById('auth-title').innerText = "Nuevo Registro";
-                }
-            } catch (e) {
-                alert("Error de conexión");
-                mostrarLoader(false);
+    let tempUser = "";
+    let correctPass = "";
+    let sessionInterval = null;
+    let sessionSeconds = SESSION_DURATION;
+    let panelVisible = false;
+
+    // ── SESSION MANAGEMENT ──────────────────────────────────────────────────
+
+    function iniciarSesion(username) {
+        const expiry = Date.now() + SESSION_DURATION * 1000;
+        localStorage.setItem('user_authenticated', 'true');
+        localStorage.setItem('user_name', username);
+        localStorage.setItem('session_expiry', expiry.toString());
+        startSessionTimer();
+    }
+
+    function startSessionTimer() {
+        const expiry = parseInt(localStorage.getItem('session_expiry') || '0');
+        if (!expiry) return;
+
+        document.getElementById('session-bar').style.display = 'block';
+        document.getElementById('session-info').style.display = 'flex';
+
+        clearInterval(sessionInterval);
+
+        sessionInterval = setInterval(() => {
+            const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
+            sessionSeconds = remaining;
+
+            // Update bar fill
+            const pct = (remaining / SESSION_DURATION) * 100;
+            document.getElementById('session-bar-fill').style.width = pct + '%';
+
+            // Update timer text
+            const m = Math.floor(remaining / 60).toString().padStart(2, '0');
+            const s = (remaining % 60).toString().padStart(2, '0');
+            document.getElementById('session-timer').textContent = `${m}:${s}`;
+
+            // Warning style at <2 min
+            const info = document.getElementById('session-info');
+            if (remaining < 120) {
+                info.classList.add('warning');
             }
-        }
 
-        async function registrarNuevo() {
-            const pass = document.getElementById('pass-reg').value;
-            const info = document.getElementById('extra-info').value;
+            if (remaining === 60) {
+                showToast('warn', '⚠ Tu sesión expirará en 1 minuto');
+            }
 
-            if(!pass || !info) return alert("Rellena todos los campos");
+            if (remaining <= 0) {
+                cerrarSesion(true);
+            }
+        }, 1000);
+    }
 
-            // Guardar en Google Sheets (POST)
-            await fetch(SCRIPT_URL, {
-                method: "POST",
-                body: JSON.stringify({
-                    usuario: tempUser,
-                    password: pass,
-                    accion: "REGISTRO NUEVO: " + info
-                })
-            });
-
-            alert("Cuenta creada. Ya puedes entrar.");
+    async function cerrarSesion(expirado = false) {
+        clearInterval(sessionInterval);
+        const username = localStorage.getItem('user_name');
+        // Notificar al Sheet que la sesión ha cerrado
+        if (username) await notificarSesion(username, 'LOGOUT');
+        localStorage.removeItem('user_authenticated');
+        localStorage.removeItem('user_name');
+        localStorage.removeItem('session_expiry');
+        if (expirado) {
+            showToast('warn', 'Sesión expirada. Vuelve a iniciar sesión.');
+            setTimeout(() => location.reload(), 1800);
+        } else {
             location.reload();
         }
+    }
 
-        function loginFinal() {
-            const pass = document.getElementById('pass-login').value;
-            if(pass === correctPass.toString()) {
-                localStorage.setItem('user_authenticated', 'true');
-                localStorage.setItem('user_name', tempUser);
-                alert("Acceso concedido");
-                // Aquí rediriges a tu URL final de tareas
-                window.location.href = "https://soporteapp.gcalidad.com";
+    async function notificarSesion(usuario, accion) {
+        try {
+            await fetch(SCRIPT_URL, {
+                method: "POST",
+                body: JSON.stringify({ usuario, accion })
+            });
+        } catch (e) { /* silencioso */ }
+    }
+
+    function verificarSesionActiva() {
+        const expiry = parseInt(localStorage.getItem('session_expiry') || '0');
+        const auth = localStorage.getItem('user_authenticated');
+        if (auth && expiry && Date.now() < expiry) {
+            // Session still valid, redirect
+            window.location.href = "https://soporteapp.gcalidad.com";
+        } else if (auth) {
+            // Expired, clean up
+            localStorage.clear();
+        }
+    }
+
+    // ── AUTH FLOW ───────────────────────────────────────────────────────────
+
+    async function verificarUsuario() {
+        tempUser = document.getElementById('user-input').value.trim();
+        if (!tempUser) return showToast('error', 'Escribe un usuario');
+
+        mostrarLoader(true);
+        try {
+            const res = await fetch(`${SCRIPT_URL}?user=${encodeURIComponent(tempUser)}`);
+            const data = await res.json();
+
+            document.getElementById('step-1').classList.add('hidden');
+            mostrarLoader(false);
+
+            if (data.exists) {
+                document.getElementById('step-login').classList.remove('hidden');
+                document.getElementById('display-name-wrap').textContent = tempUser;
+                correctPass = data.pass;
             } else {
-                alert("Contraseña incorrecta");
+                document.getElementById('step-register').classList.remove('hidden');
             }
+        } catch (e) {
+            showToast('error', 'Error de conexión');
+            mostrarLoader(false);
         }
+    }
 
-        function mostrarLoader(show) {
-            document.getElementById('loader').classList.toggle('hidden', !show);
+    async function registrarNuevo() {
+        const pass = document.getElementById('pass-reg').value;
+        const info = document.getElementById('extra-info').value;
+        if (!pass || !info) return showToast('error', 'Rellena todos los campos');
+
+        mostrarLoader(true);
+        try {
+            await fetch(SCRIPT_URL, {
+                method: "POST",
+                body: JSON.stringify({ usuario: tempUser, password: pass, accion: "REGISTRO NUEVO: " + info })
+            });
+            showToast('success', '✓ Cuenta creada correctamente');
+            setTimeout(() => location.reload(), 1800);
+        } catch (e) {
+            showToast('error', 'Error al registrar');
         }
-    </script>
+        mostrarLoader(false);
+    }
+
+    async function loginFinal() {
+        const pass = document.getElementById('pass-login').value;
+        if (pass === correctPass.toString()) {
+            // Notificar al Sheet que la sesión está activa
+            await notificarSesion(tempUser, 'LOGIN');
+            iniciarSesion(tempUser);
+            showToast('success', '✓ Acceso concedido');
+            setTimeout(() => { window.location.href = "https://soporteapp.gcalidad.com"; }, 800);
+        } else {
+            showToast('error', 'Contraseña incorrecta');
+            document.getElementById('pass-login').value = '';
+            document.getElementById('pass-login').focus();
+        }
+    }
+
+    function goBack() {
+        document.getElementById('step-login').classList.add('hidden');
+        document.getElementById('step-register').classList.add('hidden');
+        document.getElementById('step-1').classList.remove('hidden');
+        document.getElementById('user-input').value = '';
+    }
+
+    // ── USERS PANEL ─────────────────────────────────────────────────────────
+
+    function togglePanel() {
+        panelVisible = !panelVisible;
+        const panel = document.getElementById('users-panel');
+        const container = document.getElementById('app-container');
+        const btn = document.getElementById('toggle-panel-btn');
+
+        if (panelVisible) {
+            panel.classList.remove('hidden');
+            container.classList.add('has-panel');
+            btn.textContent = '✕ Ocultar panel';
+            cargarUsuarios();
+        } else {
+            panel.classList.add('hidden');
+            container.classList.remove('has-panel');
+            btn.textContent = '👥 Ver usuarios activos';
+        }
+    }
+
+    async function cargarUsuarios() {
+        const list = document.getElementById('user-list');
+        list.innerHTML = `<div class="panel-empty"><div class="empty-icon">📡</div>Cargando...</div>`;
+
+        try {
+            const res = await fetch(`${SCRIPT_URL}?action=list_users`);
+            const data = await res.json();
+
+            if (!data.users || data.users.length === 0) {
+                list.innerHTML = `<div class="panel-empty"><div class="empty-icon">🔍</div>No hay usuarios registrados</div>`;
+                document.getElementById('users-count').textContent = '';
+                return;
+            }
+
+            // Separar activos e inactivos
+            const activos   = data.users.filter(u => u.sesion_activa === 'SI');
+            const inactivos = data.users.filter(u => u.sesion_activa !== 'SI');
+
+            list.innerHTML = '';
+
+            // Cabecera activos
+            if (activos.length > 0) {
+                const hdr = document.createElement('div');
+                hdr.className = 'users-section-label active-label';
+                hdr.textContent = `● EN LÍNEA (${activos.length})`;
+                list.appendChild(hdr);
+                activos.forEach((u, i) => list.appendChild(buildUserItem(u, i, true)));
+            }
+
+            // Cabecera inactivos
+            if (inactivos.length > 0) {
+                const hdr = document.createElement('div');
+                hdr.className = 'users-section-label inactive-label';
+                hdr.textContent = `○ DESCONECTADOS (${inactivos.length})`;
+                list.appendChild(hdr);
+                inactivos.forEach((u, i) => list.appendChild(buildUserItem(u, i, false)));
+            }
+
+            const total = data.users.length;
+            document.getElementById('users-count').textContent =
+                `${activos.length} activo${activos.length !== 1 ? 's' : ''} · ${total} registrado${total !== 1 ? 's' : ''}`;
+
+        } catch (e) {
+            list.innerHTML = `<div class="panel-empty"><div class="empty-icon">⚠</div>Error al cargar usuarios</div>`;
+        }
+    }
+
+    function buildUserItem(u, i, isActive) {
+        const initials = u.usuario ? u.usuario.slice(0,2).toUpperCase() : '??';
+        const item = document.createElement('div');
+        item.className = `user-item ${isActive ? '' : 'user-inactive'}`;
+        item.style.animationDelay = `${i * 0.05}s`;
+        item.innerHTML = `
+            <div class="user-avatar ${isActive ? '' : 'avatar-inactive'}">${initials}</div>
+            <div class="user-info">
+                <div class="user-name">${escapeHtml(u.usuario || '—')}</div>
+            </div>
+            <div class="status-dot ${isActive ? '' : 'dot-inactive'}"></div>
+        `;
+        return item;
+    }
+
+    // ── HELPERS ─────────────────────────────────────────────────────────────
+
+    function mostrarLoader(show) {
+        document.getElementById('loader').classList.toggle('active', show);
+    }
+
+    function showToast(type, msg) {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.className = `toast ${type} show`;
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // Enter key support
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        const s1 = document.getElementById('step-1');
+        const sL = document.getElementById('step-login');
+        const sR = document.getElementById('step-register');
+        if (!s1.classList.contains('hidden')) verificarUsuario();
+        else if (!sL.classList.contains('hidden')) loginFinal();
+        else if (!sR.classList.contains('hidden')) registrarNuevo();
+    });
+
+    // ── INIT ─────────────────────────────────────────────────────────────────
+    verificarSesionActiva();
+</script>
 </body>
 </html>
