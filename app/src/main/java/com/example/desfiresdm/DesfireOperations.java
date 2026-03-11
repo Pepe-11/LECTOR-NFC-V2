@@ -16,26 +16,17 @@ import java.util.Arrays;
 /**
  * Operaciones DESFire EV3.
  * Signaturas verificadas contra el AAR de TapLinx v5.0.0.
- *
- * authenticate  : (int keyNo, AuthType, KeyType, IKeyData) -> void
- * getApplicationIDs : () -> ArrayList
- * readData      : (int, int, int) -> byte[]
- * writeData     : (int, int, byte[]) -> void  |  (int, int, byte[], CommunicationType) -> void
- * createApplication (EV3): (byte[], EV3ApplicationKeySettings) -> void
- *                       or (byte[], EV3ApplicationKeySettings, byte[], byte[]) -> void
- * createFile (EV3): (int, EV3FileSettings) -> void
- * changeKey : (int, KeyType, byte[], byte[], byte) -> void
  */
 public class DesfireOperations {
 
     private static final String TAG = "DesfireOps";
 
-    // DESFire AID es siempre 3 bytes. 0xD27600 es el AID estándar NDEF para DESFire.
-    public static final byte[] NDEF_AID        = new byte[]{(byte)0xD2, 0x76, 0x00};
-    public static final int    NDEF_CC_FILE_ID  = 0x01;
+    // FIX 1: DESFire AID es siempre 3 bytes. 0xD27600 es el AID estándar NDEF.
+    public static final byte[] NDEF_AID         = new byte[]{(byte)0xD2, 0x76, 0x00};
+    public static final int    NDEF_CC_FILE_ID   = 0x01;
     public static final int    NDEF_DATA_FILE_ID = 0x02;
-    public static final int    NDEF_FILE_SIZE   = 256;
-    public static final byte[] DEFAULT_KEY      = new byte[16]; // 16 x 0x00
+    public static final int    NDEF_FILE_SIZE    = 256;
+    public static final byte[] DEFAULT_KEY       = new byte[16]; // 16 x 0x00
 
     private final IDESFireEV1 cardV1;
     private final IDESFireEV3 cardV3;
@@ -60,17 +51,15 @@ public class DesfireOperations {
     }
 
     /**
-     * getApplicationIDs() devuelve ArrayList en TapLinx v5 — se convierte a lista legible.
+     * FIX 2: TapLinx exige seleccionar la app maestra (000000) antes de getApplicationIDs().
      */
     @SuppressWarnings("unchecked")
     public ArrayList<byte[]> readApplicationIds() throws Exception {
-        // TapLinx exige que la aplicación maestra (AID 000000) esté seleccionada antes
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
         Object result = cardV1.getApplicationIDs();
         if (result instanceof ArrayList) {
             return (ArrayList<byte[]>) result;
         }
-        // fallback: int[] (versiones antiguas)
         if (result instanceof int[]) {
             int[] ids = (int[]) result;
             ArrayList<byte[]> list = new ArrayList<>();
@@ -88,7 +77,6 @@ public class DesfireOperations {
 
     // ─────────────────────────────────────────────────────────────────────────
     // AUTENTICACIÓN
-    // Signatura: authenticate(int keyNo, AuthType authType, KeyType keyType, IKeyData keyData)
     // ─────────────────────────────────────────────────────────────────────────
 
     public void authenticatePicc(byte[] masterKey) throws Exception {
@@ -117,7 +105,6 @@ public class DesfireOperations {
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
         authenticatePicc(null);
 
-        // Verificar si ya existe
         ArrayList<byte[]> existingApps = readApplicationIds();
         for (byte[] aid : existingApps) {
             if (Arrays.equals(aid, NDEF_AID)) {
@@ -126,25 +113,24 @@ public class DesfireOperations {
             }
         }
 
-        // Construir EV3ApplicationKeySettings con Builder
-        EV3ApplicationKeySettings keySettings = EV3ApplicationKeySettings.createEV3ApplicationKeySettings()
-            .setKeyTypeOfApplicationKeys(KeyType.AES128)
-            .setMaxNumberOfApplicationKeys(2)
-            .setAppMasterKeyChangeable(true)
-            .setAppKeySettingsChangeable(true)
-            .setAuthenticationRequiredForFileManagement(false)
-            .build();
+        // FIX 3: usar new EV3ApplicationKeySettings.Builder() — el método estático
+        // createEV3ApplicationKeySettings() es package-private en TapLinx v5.
+        // Los setters devuelven void, no se pueden encadenar.
+        EV3ApplicationKeySettings.Builder keySettingsBuilder = new EV3ApplicationKeySettings.Builder();
+        keySettingsBuilder.setKeyTypeOfApplicationKeys(KeyType.AES128);
+        keySettingsBuilder.setMaxNumberOfApplicationKeys(2);
+        keySettingsBuilder.setAppMasterKeyChangeable(true);
+        keySettingsBuilder.setAppKeySettingsChangeable(true);
+        keySettingsBuilder.setAuthenticationRequiredForFileManagement(false);
+        EV3ApplicationKeySettings keySettings = keySettingsBuilder.build();
 
-        // createApplication(byte[] aid, EV3ApplicationKeySettings)
         cardV3.createApplication(NDEF_AID, keySettings);
         Log.d(TAG, "Aplicación NDEF creada");
 
         cardV1.selectApplication(NDEF_AID);
         authenticateApp(null, 0);
 
-        // Cambiar clave si se proporcionó
         if (appMasterKey != null && !Arrays.equals(appMasterKey, DEFAULT_KEY)) {
-            // changeKey(int keyNo, KeyType, byte[] newKey, byte[] oldKey, byte keyVersion)
             cardV1.changeKey(0, KeyType.AES128, appMasterKey, DEFAULT_KEY, (byte) 0x01);
         }
 
@@ -155,7 +141,6 @@ public class DesfireOperations {
 
     // ─────────────────────────────────────────────────────────────────────────
     // ESCRIBIR URL NDEF
-    // writeData(int fileNo, int offset, byte[]) -> void
     // ─────────────────────────────────────────────────────────────────────────
 
     public void writeNdefUrl(String url) throws Exception {
@@ -163,11 +148,8 @@ public class DesfireOperations {
         if (ndefMessage.length > NDEF_FILE_SIZE) {
             throw new Exception("URL demasiado larga (" + ndefMessage.length + " bytes).");
         }
-
         cardV1.selectApplication(NDEF_AID);
         authenticateApp(null, 0);
-
-        // writeData(int fileNo, int offset, byte[] data)
         cardV1.writeData(NDEF_DATA_FILE_ID, 0, ndefMessage);
         Log.d(TAG, "URL escrita: " + url);
     }
@@ -215,12 +197,10 @@ public class DesfireOperations {
 
     // ─────────────────────────────────────────────────────────────────────────
     // LEER NDEF
-    // readData(int fileNo, int offset, int length) -> byte[]
     // ─────────────────────────────────────────────────────────────────────────
 
     public byte[] readNdefFile() throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        // readData(int fileNo, int offset, int length) — length 0 = leer todo
         return cardV1.readData(NDEF_DATA_FILE_ID, 0, 0);
     }
 
@@ -247,8 +227,6 @@ public class DesfireOperations {
     // ─────────────────────────────────────────────────────────────────────────
 
     public void calculateSdmOffsets(String url, SdmConfig config) {
-        // NDEF file layout: [2 bytes NLEN][D1 01 payloadLen 55 uriId][url sin prefijo]
-        // offset base hasta el comienzo de la url en el fichero = 7 bytes
         int urlBase = 7;
         int protocolLen = url.startsWith("https://") ? 8 : (url.startsWith("http://") ? 7 : 0);
 
@@ -350,22 +328,16 @@ public class DesfireOperations {
         }
     }
 
-    /** int → 3 bytes little-endian (formato DESFire para offsets) */
     private byte[] intTo3Bytes(int v) {
         return new byte[]{(byte)(v & 0xFF), (byte)((v >> 8) & 0xFF), (byte)((v >> 16) & 0xFF)};
     }
 
-    /**
-     * Construye IKeyData para AES-128.
-     * Usa reflexión para acceder a DESFireKeyUtils (clase interna no pública).
-     */
     private IKeyData buildKeyData(byte[] keyBytes) throws Exception {
         try {
             Class<?> cls = Class.forName("com.nxp.nfclib.desfire.DESFireKeyUtils");
             java.lang.reflect.Method m = cls.getMethod("getKey", byte[].class, KeyType.class);
             return (IKeyData) m.invoke(null, keyBytes, KeyType.AES128);
         } catch (Exception e) {
-            // Fallback: DefaultKeyData
             try {
                 Class<?> cls = Class.forName("com.nxp.nfclib.defaultimpl.KeyData");
                 java.lang.reflect.Constructor<?> ctor = cls.getConstructor(byte[].class, KeyType.class);
