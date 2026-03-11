@@ -350,8 +350,11 @@ public class DesfireOperations {
      *   → hay que envolver el byte[] en un SecretKeySpec("AES") primero.
      */
     private IKeyData buildKeyData(byte[] keyBytes) throws Exception {
+        // AAR confirma: KeyData() constructor vacío + setKey(java.security.Key)
         SecretKey secretKey = new SecretKeySpec(keyBytes, "AES");
-        return new KeyData(secretKey);
+        KeyData keyData = new KeyData();
+        keyData.setKey(secretKey);
+        return keyData;
     }
 
     public static String bytesToHex(byte[] bytes) {
