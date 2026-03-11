@@ -1,32 +1,42 @@
-package com.example.desfiresdm;
 
-import android.util.Log;
-
-import com.nxp.nfclib.KeyType;
-import com.nxp.nfclib.desfire.DESFireEV3File;
-import com.nxp.nfclib.desfire.EV3ApplicationKeySettings;
-import com.nxp.nfclib.desfire.IDESFireEV1;
-import com.nxp.nfclib.desfire.IDESFireEV3;
-import com.nxp.nfclib.interfaces.IKeyData;
-
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
 /**
- * Operaciones DESFire EV3.
- * Signaturas verificadas contra el AAR de TapLinx v5.0.0.
+ * Operaciones DESFire EV3 — basado en inspección directa del AAR NxpNfcAndroidLib-release.
+ *
+ * Hallazgos del AAR:
+ *  - KeyData(java.security.Key) es el único constructor público → wrappear byte[] como SecretKeySpec
+ *  - EV3ApplicationKeySettings.Builder setters devuelven Builder (fluent) → se pueden encadenar
+ *  - createEV3ApplicationKeySettings(byte[]) es package-private → usar new Builder() en su lugar
+ *  - authenticate(int, AuthType, KeyType, IKeyData) es la firma correcta
  */
 public class DesfireOperations {
 
     private static final String TAG = "DesfireOps";
 
-    // FIX 1: DESFire AID es siempre 3 bytes. 0xD27600 es el AID estándar NDEF.
-    public static final byte[] NDEF_AID         = new byte[]{(byte)0xD2, 0x76, 0x00};
+    // AID DESFire = 3 bytes obligatorio
+    public static final byte[] NDEF_AID          = new byte[]{(byte)0xD2, 0x76, 0x00};
     public static final int    NDEF_CC_FILE_ID   = 0x01;
     public static final int    NDEF_DATA_FILE_ID = 0x02;
-    public static final int    NDEF_FILE_SIZE    = 256;
-    public static final byte[] DEFAULT_KEY       = new byte[16]; // 16 x 0x00
+    public static final int    NDEF_FILE_SIZE    = 255;
+    public static final byte[] DEFAULT_KEY       = new byte[16]; // AES-128 todo ceros
+
+    // CC correcto con ISO File ID 0xE104 — imprescindible para que los móviles lean NDEF
+    private static final byte[] CC_DATA = new byte[]{
+        0x00, 0x0F,              // Tamaño CC: 15 bytes
+        0x20,                    // Versión NDEF 2.0
+        0x00, 0x7F,              // Max lectura
+        0x00, 0x73,              // Max escritura
+        0x04, 0x06,              // NDEF File Control TLV
+        (byte)0xE1, 0x04,        // ISO File ID 0xE104 ← clave para móviles NFC
+        0x00, (byte)0xFF,        // Max NDEF: 255 bytes
+        0x00,                    // Lectura libre
+        0x00                     // Escritura libre
+    };
 
     private final IDESFireEV1 cardV1;
     private final IDESFireEV3 cardV3;
@@ -36,7 +46,6 @@ public class DesfireOperations {
         this.cardV1 = card;
     }
 
-    /** Constructor sin tarjeta (solo para calcular offsets) */
     public DesfireOperations() {
         this.cardV3 = null;
         this.cardV1 = null;
@@ -50,11 +59,9 @@ public class DesfireOperations {
         return cardV1.getCardDetails();
     }
 
-    /**
-     * FIX 2: TapLinx exige seleccionar la app maestra (000000) antes de getApplicationIDs().
-     */
     @SuppressWarnings("unchecked")
     public ArrayList<byte[]> readApplicationIds() throws Exception {
+        // TapLinx exige seleccionar app maestra (000000) antes de getApplicationIDs()
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
         Object result = cardV1.getApplicationIDs();
         if (result instanceof ArrayList) {
@@ -77,12 +84,13 @@ public class DesfireOperations {
 
     // ─────────────────────────────────────────────────────────────────────────
     // AUTENTICACIÓN
+    // KeyData constructor real del AAR: KeyData(java.security.Key)
+    // → wrappear byte[] con SecretKeySpec("AES")
     // ─────────────────────────────────────────────────────────────────────────
 
     public void authenticatePicc(byte[] masterKey) throws Exception {
         byte[] key = (masterKey != null) ? masterKey : DEFAULT_KEY;
-        IKeyData keyData = buildKeyData(key);
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128, keyData);
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(key));
         Log.d(TAG, "Autenticado en PICC");
     }
 
@@ -113,16 +121,15 @@ public class DesfireOperations {
             }
         }
 
-        // FIX 3: usar new EV3ApplicationKeySettings.Builder() — el método estático
-        // createEV3ApplicationKeySettings() es package-private en TapLinx v5.
-        // Los setters devuelven void, no se pueden encadenar.
-        EV3ApplicationKeySettings.Builder keySettingsBuilder = new EV3ApplicationKeySettings.Builder();
-        keySettingsBuilder.setKeyTypeOfApplicationKeys(KeyType.AES128);
-        keySettingsBuilder.setMaxNumberOfApplicationKeys(2);
-        keySettingsBuilder.setAppMasterKeyChangeable(true);
-        keySettingsBuilder.setAppKeySettingsChangeable(true);
-        keySettingsBuilder.setAuthenticationRequiredForFileManagement(false);
-        EV3ApplicationKeySettings keySettings = keySettingsBuilder.build();
+        // Builder es fluent (los setters devuelven EV3ApplicationKeySettings$Builder)
+        // createEV3ApplicationKeySettings() es package-private → usar new Builder()
+        EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
+            .setKeyTypeOfApplicationKeys(KeyType.AES128)
+            .setMaxNumberOfApplicationKeys(2)
+            .setAppMasterKeyChangeable(true)
+            .setAppKeySettingsChangeable(true)
+            .setAuthenticationRequiredForFileManagement(false)
+            .build();
 
         cardV3.createApplication(NDEF_AID, keySettings);
         Log.d(TAG, "Aplicación NDEF creada");
@@ -256,18 +263,9 @@ public class DesfireOperations {
                 null
             );
         cardV3.createFile(NDEF_CC_FILE_ID, ccSettings);
-
-        byte[] cc = new byte[]{
-            0x00, 0x0F, 0x20,
-            0x00, (byte)(NDEF_FILE_SIZE >> 8), (byte)NDEF_FILE_SIZE,
-            0x00, (byte)0xFF,
-            0x04, 0x06,
-            0x00, (byte)NDEF_DATA_FILE_ID,
-            0x00, (byte)(NDEF_FILE_SIZE >> 8), (byte)NDEF_FILE_SIZE,
-            0x00, (byte)0x80
-        };
-        cardV1.writeData(NDEF_CC_FILE_ID, 0, cc);
-        Log.d(TAG, "Fichero CC creado");
+        // Escribir CC con ISO File ID 0xE104 correcto (igual que script Python que sí funciona)
+        cardV1.writeData(NDEF_CC_FILE_ID, 0, CC_DATA);
+        Log.d(TAG, "Fichero CC creado con ISO ID E104");
     }
 
     private void createNdefDataFile() throws Exception {
@@ -332,20 +330,16 @@ public class DesfireOperations {
         return new byte[]{(byte)(v & 0xFF), (byte)((v >> 8) & 0xFF), (byte)((v >> 16) & 0xFF)};
     }
 
+    /**
+     * Construye IKeyData a partir de un byte[] de clave AES-128.
+     *
+     * Inspección del AAR confirma:
+     *   KeyData tiene UN solo constructor público: KeyData(java.security.Key)
+     *   → hay que envolver el byte[] en un SecretKeySpec("AES") primero.
+     */
     private IKeyData buildKeyData(byte[] keyBytes) throws Exception {
-        try {
-            Class<?> cls = Class.forName("com.nxp.nfclib.desfire.DESFireKeyUtils");
-            java.lang.reflect.Method m = cls.getMethod("getKey", byte[].class, KeyType.class);
-            return (IKeyData) m.invoke(null, keyBytes, KeyType.AES128);
-        } catch (Exception e) {
-            try {
-                Class<?> cls = Class.forName("com.nxp.nfclib.defaultimpl.KeyData");
-                java.lang.reflect.Constructor<?> ctor = cls.getConstructor(byte[].class, KeyType.class);
-                return (IKeyData) ctor.newInstance(keyBytes, KeyType.AES128);
-            } catch (Exception e2) {
-                throw new Exception("No se pudo construir IKeyData: " + e2.getMessage());
-            }
-        }
+        SecretKey secretKey = new SecretKeySpec(keyBytes, "AES");
+        return new KeyData(secretKey);
     }
 
     public static String bytesToHex(byte[] bytes) {
