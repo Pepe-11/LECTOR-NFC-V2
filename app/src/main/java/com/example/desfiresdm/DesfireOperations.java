@@ -30,7 +30,8 @@ public class DesfireOperations {
 
     private static final String TAG = "DesfireOps";
 
-    public static final byte[] NDEF_AID        = new byte[]{(byte)0xD2, 0x76, 0x00, 0x00, (byte)0x85, 0x01, 0x01};
+    // DESFire AID es siempre 3 bytes. 0xD27600 es el AID estándar NDEF para DESFire.
+    public static final byte[] NDEF_AID        = new byte[]{(byte)0xD2, 0x76, 0x00};
     public static final int    NDEF_CC_FILE_ID  = 0x01;
     public static final int    NDEF_DATA_FILE_ID = 0x02;
     public static final int    NDEF_FILE_SIZE   = 256;
@@ -63,6 +64,8 @@ public class DesfireOperations {
      */
     @SuppressWarnings("unchecked")
     public ArrayList<byte[]> readApplicationIds() throws Exception {
+        // TapLinx exige que la aplicación maestra (AID 000000) esté seleccionada antes
+        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
         Object result = cardV1.getApplicationIDs();
         if (result instanceof ArrayList) {
             return (ArrayList<byte[]>) result;
@@ -123,16 +126,14 @@ public class DesfireOperations {
             }
         }
 
-        // Construir EV3ApplicationKeySettings con el Builder público
-        // (createEV3ApplicationKeySettings es package-private en TapLinx v5;
-        //  se usa new EV3ApplicationKeySettings.Builder() como en EV1/EV2ApplicationKeySettings)
-        EV3ApplicationKeySettings.Builder keySettingsBuilder = new EV3ApplicationKeySettings.Builder();
-        keySettingsBuilder.setKeyTypeOfApplicationKeys(KeyType.AES128);
-        keySettingsBuilder.setMaxNumberOfApplicationKeys(2);
-        keySettingsBuilder.setAppMasterKeyChangeable(true);
-        keySettingsBuilder.setAppKeySettingsChangeable(true);
-        keySettingsBuilder.setAuthenticationRequiredForFileManagement(false);
-        EV3ApplicationKeySettings keySettings = keySettingsBuilder.build();
+        // Construir EV3ApplicationKeySettings con Builder
+        EV3ApplicationKeySettings keySettings = EV3ApplicationKeySettings.createEV3ApplicationKeySettings()
+            .setKeyTypeOfApplicationKeys(KeyType.AES128)
+            .setMaxNumberOfApplicationKeys(2)
+            .setAppMasterKeyChangeable(true)
+            .setAppKeySettingsChangeable(true)
+            .setAuthenticationRequiredForFileManagement(false)
+            .build();
 
         // createApplication(byte[] aid, EV3ApplicationKeySettings)
         cardV3.createApplication(NDEF_AID, keySettings);
