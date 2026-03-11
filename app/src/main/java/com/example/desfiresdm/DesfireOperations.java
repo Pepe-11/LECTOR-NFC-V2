@@ -124,7 +124,15 @@ public class DesfireOperations {
         }
 
         // Construir EV3ApplicationKeySettings con Builder
-        EV3ApplicationKeySettings keySettings = EV3ApplicationKeySettings.createEV3ApplicationKeySettings()
+        // Byte de configuración: 0x0F = master key changeable + key settings changeable
+        //                        + no auth required for file management + 2 keys AES
+        // Formato: bits[3:0]=maxKeys(2), bit[4]=fileManagFree(1), bit[5]=keySettingsChangeable(1),
+        //          bit[6]=masterKeyChangeable(1), bit[7]=reserved(0) → 0x0F = 0b00001111 → 2 keys
+        // Se pasa el raw keySetting byte que TapLinx deserializa internamente.
+        byte[] keySettingsBytes = new byte[]{
+            (byte) 0x0F  // AppMasterKeyChangeable | AppKeySettingsChangeable | NoAuthForFileMgmt | 2 keys
+        };
+        EV3ApplicationKeySettings keySettings = EV3ApplicationKeySettings.createEV3ApplicationKeySettings(keySettingsBytes)
             .setKeyTypeOfApplicationKeys(KeyType.AES128)
             .setMaxNumberOfApplicationKeys(2)
             .setAppMasterKeyChangeable(true)
