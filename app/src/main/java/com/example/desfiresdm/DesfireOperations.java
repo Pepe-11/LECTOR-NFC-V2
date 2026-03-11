@@ -1,4 +1,16 @@
+package com.example.desfiresdm;
 
+import android.util.Log;
+
+import com.nxp.nfclib.KeyType;
+import com.nxp.nfclib.desfire.DESFireEV3File;
+import com.nxp.nfclib.desfire.EV3ApplicationKeySettings;
+import com.nxp.nfclib.desfire.IDESFireEV1;
+import com.nxp.nfclib.desfire.IDESFireEV3;
+import com.nxp.nfclib.defaultimpl.KeyData;
+import com.nxp.nfclib.interfaces.IKeyData;
+
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 
