@@ -15,14 +15,13 @@ import com.nxp.nfclib.desfire.DESFireEV3File;
 import com.nxp.nfclib.desfire.IDESFireEV1;
 import com.nxp.nfclib.desfire.IDESFireEV3;
 
+import java.util.ArrayList;
+
 public class ReadCardActivity extends AppCompatActivity {
 
     private TextView tvResult;
     private ProgressBar progressBar;
-    private Button btnReadBasic;
-    private Button btnReadNdef;
-    private Button btnReadSdm;
-
+    private Button btnReadBasic, btnReadNdef, btnReadSdm;
     private NfcManager nfcManager;
 
     @Override
@@ -64,11 +63,11 @@ public class ReadCardActivity extends AppCompatActivity {
         protected void onPreExecute() {
             progressBar.setVisibility(View.VISIBLE);
             tvResult.setText("Leyendo...");
-            setButtonsEnabled(false);
+            setButtons(false);
         }
 
         @Override
-        protected String doInBackground(Void... voids) {
+        protected String doInBackground(Void... v) {
             IDESFireEV3 card = nfcManager.getCurrentCardEV3();
             if (card == null) { error = "No hay tarjeta activa"; return null; }
             DesfireOperations ops = new DesfireOperations(card);
@@ -85,42 +84,34 @@ public class ReadCardActivity extends AppCompatActivity {
         @Override
         protected void onPostExecute(String result) {
             progressBar.setVisibility(View.GONE);
-            setButtonsEnabled(true);
+            setButtons(true);
             if (result != null) {
                 tvResult.setText(result);
             } else {
-                tvResult.setText("❌ Error: " + error);
+                tvResult.setText("❌ " + error);
                 Toast.makeText(ReadCardActivity.this, "Error: " + error, Toast.LENGTH_LONG).show();
             }
         }
 
         private String readBasic(DesfireOperations ops) throws Exception {
-            StringBuilder sb = new StringBuilder();
-
-            IDESFireEV1.CardDetails details = ops.readCardDetails();
-            sb.append("── INFO TARJETA ─────────────\n");
-            if (details != null) {
-                sb.append("Nombre:      ").append(details.cardName).append("\n");
-                sb.append("Versión HW:  ").append(details.majorVersion).append(".").append(details.minorVersion).append("\n");
-                sb.append("Memoria:     ").append(details.freeMemory).append(" / ").append(details.totalMemory).append(" bytes\n");
-                sb.append("Vendor ID:   ").append(DesfireOperations.bytesToHex(new byte[]{details.vendorID})).append("\n");
+            StringBuilder sb = new StringBuilder("── INFO TARJETA ─────────────\n");
+            IDESFireEV1.CardDetails d = ops.readCardDetails();
+            if (d != null) {
+                sb.append("Nombre:     ").append(d.cardName).append("\n");
+                sb.append("Versión HW: ").append(d.majorVersion).append(".").append(d.minorVersion).append("\n");
+                sb.append("Memoria:    ").append(d.freeMemory).append(" / ").append(d.totalMemory).append(" bytes\n");
+                // vendorID puede ser int o byte según versión SDK — usar cast seguro
+                sb.append("Vendor ID:  ").append(String.format("%02X", d.vendorID & 0xFF)).append("\n");
             }
-
-            byte[][] apps = ops.readApplicationIds();
-            sb.append("\n── APLICACIONES (").append(apps != null ? apps.length : 0).append(") ───────\n");
-            if (apps != null) {
-                for (byte[] aid : apps) {
-                    sb.append("  AID: ").append(DesfireOperations.bytesToHex(aid)).append("\n");
-                }
-            }
+            ArrayList<byte[]> apps = ops.readApplicationIds();
+            sb.append("\n── APLICACIONES (").append(apps.size()).append(") ───────\n");
+            for (byte[] aid : apps) sb.append("  AID: ").append(DesfireOperations.bytesToHex(aid)).append("\n");
             return sb.toString();
         }
 
         private String readNdef(DesfireOperations ops) throws Exception {
-            StringBuilder sb = new StringBuilder();
-            sb.append("── CONTENIDO NDEF ───────────\n");
+            StringBuilder sb = new StringBuilder("── CONTENIDO NDEF ───────────\n");
             sb.append(ops.readNdefAsString()).append("\n\n");
-
             byte[] raw = ops.readNdefFile();
             sb.append("── RAW (primeros 64 bytes) ──\n");
             if (raw != null) {
@@ -135,30 +126,27 @@ public class ReadCardActivity extends AppCompatActivity {
         private String readSdm(DesfireOperations ops) throws Exception {
             DESFireEV3File.StdEV3DataFileSettings s = ops.readSdmSettings();
             if (s == null) return "No se pudo leer configuración SDM";
-
-            StringBuilder sb = new StringBuilder();
-            sb.append("── CONFIGURACIÓN SDM ────────\n");
+            StringBuilder sb = new StringBuilder("── CONFIGURACIÓN SDM ────────\n");
             sb.append("SDM habilitado:  ").append(s.isSDMEnabled()).append("\n");
             sb.append("UID mirroring:   ").append(s.isUIDMirroringEnabled()).append("\n");
             sb.append("Counter SDM:     ").append(s.isSDMReadCounterEnabled()).append("\n");
             sb.append("Counter limit:   ").append(s.isSDMReadCounterLimitEnabled()).append("\n");
-            sb.append("Cifrado SDM:     ").append(s.isSDMEncryptFileDataEnabled()).append("\n\n");
-
+            sb.append("Cifrado SDM:     ").append(s.isSDMEncryptFileDataEnabled()).append("\n");
             if (s.isSDMEnabled()) {
-                sb.append("── OFFSETS ──────────────────\n");
-                sb.append("PICC offset:     ").append(DesfireOperations.bytesToHex(s.getPiccDataOffset())).append("\n");
-                sb.append("MAC offset:      ").append(DesfireOperations.bytesToHex(s.getSdmMacOffset())).append("\n");
+                sb.append("\n── OFFSETS ──────────────────\n");
+                sb.append("PICC offset:    ").append(DesfireOperations.bytesToHex(s.getPiccDataOffset())).append("\n");
+                sb.append("MAC offset:     ").append(DesfireOperations.bytesToHex(s.getSdmMacOffset())).append("\n");
                 if (s.isSDMReadCounterEnabled())
-                    sb.append("Counter offset:  ").append(DesfireOperations.bytesToHex(s.getSdmReadCounterOffset())).append("\n");
+                    sb.append("Counter offset: ").append(DesfireOperations.bytesToHex(s.getSdmReadCounterOffset())).append("\n");
                 if (s.isSDMEncryptFileDataEnabled()) {
-                    sb.append("Enc offset:      ").append(DesfireOperations.bytesToHex(s.getSdmEncryptionOffset())).append("\n");
-                    sb.append("Enc length:      ").append(DesfireOperations.bytesToHex(s.getSdmEncryptionLength())).append("\n");
+                    sb.append("Enc offset:     ").append(DesfireOperations.bytesToHex(s.getSdmEncryptionOffset())).append("\n");
+                    sb.append("Enc length:     ").append(DesfireOperations.bytesToHex(s.getSdmEncryptionLength())).append("\n");
                 }
             }
             return sb.toString();
         }
 
-        private void setButtonsEnabled(boolean enabled) {
+        private void setButtons(boolean enabled) {
             btnReadBasic.setEnabled(enabled);
             btnReadNdef.setEnabled(enabled);
             btnReadSdm.setEnabled(enabled);
