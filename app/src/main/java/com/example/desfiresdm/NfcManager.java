@@ -27,7 +27,7 @@ public class NfcManager {
 
     // ── Reemplaza con tu API key de TapLinx ──────────────────────────────────
     // Obtén una clave gratuita de desarrollador en https://www.nxp.com/taplinx
-    public static final String TAPLINX_API_KEY = "PUT_YOUR_TAPLINX_API_KEY_HERE";
+    public static final String TAPLINX_API_KEY = "219779f86adf848e473e75a2c56b7da6";
     // ─────────────────────────────────────────────────────────────────────────
 
     private static NfcManager instance;
