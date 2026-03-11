@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@color/background">
+
+    <!-- Título -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="DESFire EV3 SDM Tool"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:textColor="@color/primary"
+        android:gravity="center"
+        android:paddingBottom="8dp" />
+
+    <!-- Status NFC -->
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Iniciando..."
+        android:textSize="14sp"
+        android:padding="12dp"
+        android:gravity="center"
+        android:textColor="@android:color/white"
+        android:background="@color/status_ok"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Icono NFC / animación -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:text="📡"
+        android:textSize="60sp"
+        android:gravity="center"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Info de la tarjeta -->
+    <TextView
+        android:id="@+id/tv_card_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Acerca una tarjeta DESFire EV3"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:padding="8dp"
+        android:textColor="@color/text_secondary"
+        android:layout_marginBottom="24dp" />
+
+    <!-- Botones de operación -->
+    <Button
+        android:id="@+id/btn_read"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="📖  Leer Tarjeta"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/primary" />
+
+    <Button
+        android:id="@+id/btn_write"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="✏️  Escribir URL NDEF"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/accent" />
+
+    <Button
+        android:id="@+id/btn_sdm"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="🔐  Configurar SDM"
+        android:textSize="16sp"
+        android:layout_marginBottom="24dp"
+        android:backgroundTint="@color/sdm_color" />
+
+    <!-- Separador -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/btn_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ℹ️  Información"
+        android:backgroundTint="@color/button_secondary" />
+
+</LinearLayout>

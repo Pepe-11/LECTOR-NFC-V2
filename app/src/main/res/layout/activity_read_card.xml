@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Botones de lectura -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp">
+
+        <Button
+            android:id="@+id/btn_read_basic"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Info Básica"
+            android:textSize="12sp"
+            android:layout_marginEnd="4dp"
+            android:backgroundTint="@color/primary" />
+
+        <Button
+            android:id="@+id/btn_read_ndef"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="NDEF"
+            android:textSize="12sp"
+            android:layout_marginHorizontal="4dp"
+            android:backgroundTint="@color/accent" />
+
+        <Button
+            android:id="@+id/btn_read_sdm"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="SDM Config"
+            android:textSize="12sp"
+            android:layout_marginStart="4dp"
+            android:backgroundTint="@color/sdm_color" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/progress_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:visibility="gone"
+        android:layout_marginBottom="8dp" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <TextView
+            android:id="@+id/tv_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Pulsa un botón para leer la tarjeta"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:padding="12dp"
+            android:background="@color/card_background" />
+    </ScrollView>
+
+</LinearLayout>

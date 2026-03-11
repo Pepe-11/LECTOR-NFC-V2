@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- URL -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="URL con placeholders SDM"
+        android:textStyle="bold"
+        android:textSize="15sp"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Usa 32 ceros para PICC Data, 16 para MAC, 6 para contador"
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/et_sdm_url"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="textUri"
+        android:singleLine="false"
+        android:minLines="3"
+        android:hint="https://sdm.ejemplo.com/nfc?p=00000000...&m=0000..."
+        android:textSize="11sp"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Opciones SDM -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Campos SDM a activar"
+        android:textStyle="bold"
+        android:textSize="15sp"
+        android:layout_marginBottom="8dp" />
+
+    <CheckBox
+        android:id="@+id/cb_uid_mirroring"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="UID Mirroring (PICC Data cifrado en la URL)"
+        android:layout_marginBottom="4dp" />
+
+    <CheckBox
+        android:id="@+id/cb_read_counter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Contador de lecturas SDM"
+        android:layout_marginBottom="4dp" />
+
+    <CheckBox
+        android:id="@+id/cb_encryption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Cifrado de datos del fichero (SDM Encryption)"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/et_enc_length"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Longitud datos cifrados (bytes, múltiplo de 16)"
+        android:inputType="number"
+        android:enabled="false"
+        android:textSize="12sp"
+        android:layout_marginBottom="8dp" />
+
+    <CheckBox
+        android:id="@+id/cb_counter_limit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Limitar número de lecturas"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/et_counter_limit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Número máximo de lecturas"
+        android:inputType="number"
+        android:enabled="false"
+        android:textSize="12sp"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Calcular offsets -->
+    <Button
+        android:id="@+id/btn_calculate_offsets"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔢 Calcular Offsets"
+        android:backgroundTint="@color/button_secondary"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/tv_offsets"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Los offsets se mostrarán aquí"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:padding="10dp"
+        android:background="@color/card_background"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Botones de acción -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <Button
+            android:id="@+id/btn_apply_sdm"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🔐 Aplicar SDM"
+            android:layout_marginEnd="8dp"
+            android:backgroundTint="@color/sdm_color" />
+
+        <Button
+            android:id="@+id/btn_disable_sdm"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="❌ Deshabilitar"
+            android:backgroundTint="@color/error_color" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/progress_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:visibility="gone"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/tv_result"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="El resultado aparecerá aquí"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:padding="10dp"
+        android:background="@color/card_background" />
+
+</LinearLayout>
+</ScrollView>
