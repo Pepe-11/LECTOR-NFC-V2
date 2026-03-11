@@ -11,18 +11,10 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.nxp.nfclib.desfire.DESFireEV3;
 import com.nxp.nfclib.desfire.DESFireEV3File;
 import com.nxp.nfclib.desfire.IDESFireEV1;
+import com.nxp.nfclib.desfire.IDESFireEV3;
 
-/**
- * Activity para leer información de la tarjeta DESFire EV3:
- *  - UID
- *  - Versión hardware/software
- *  - Lista de aplicaciones
- *  - Contenido NDEF
- *  - Configuración SDM actual
- */
 public class ReadCardActivity extends AppCompatActivity {
 
     private TextView tvResult;
@@ -43,53 +35,30 @@ public class ReadCardActivity extends AppCompatActivity {
             getSupportActionBar().setTitle("Leer Tarjeta");
         }
 
-        tvResult    = findViewById(R.id.tv_result);
-        progressBar = findViewById(R.id.progress_bar);
+        tvResult     = findViewById(R.id.tv_result);
+        progressBar  = findViewById(R.id.progress_bar);
         btnReadBasic = findViewById(R.id.btn_read_basic);
         btnReadNdef  = findViewById(R.id.btn_read_ndef);
         btnReadSdm   = findViewById(R.id.btn_read_sdm);
 
         nfcManager = NfcManager.getInstance();
 
-        btnReadBasic.setOnClickListener(v -> readBasicInfo());
-        btnReadNdef.setOnClickListener(v -> readNdef());
-        btnReadSdm.setOnClickListener(v -> readSdmConfig());
-    }
-
-    private void readBasicInfo() {
-        new CardReadTask(CardReadTask.MODE_BASIC).execute();
-    }
-
-    private void readNdef() {
-        new CardReadTask(CardReadTask.MODE_NDEF).execute();
-    }
-
-    private void readSdmConfig() {
-        new CardReadTask(CardReadTask.MODE_SDM).execute();
+        btnReadBasic.setOnClickListener(v -> new CardReadTask(1).execute());
+        btnReadNdef.setOnClickListener(v -> new CardReadTask(2).execute());
+        btnReadSdm.setOnClickListener(v -> new CardReadTask(3).execute());
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == android.R.id.home) {
-            finish();
-            return true;
-        }
+        if (item.getItemId() == android.R.id.home) { finish(); return true; }
         return super.onOptionsItemSelected(item);
     }
 
-    // ── AsyncTask para no bloquear el hilo de UI ──────────────────────────────
-
     private class CardReadTask extends AsyncTask<Void, Void, String> {
-        static final int MODE_BASIC = 1;
-        static final int MODE_NDEF  = 2;
-        static final int MODE_SDM   = 3;
-
         private final int mode;
         private String error;
 
-        CardReadTask(int mode) {
-            this.mode = mode;
-        }
+        CardReadTask(int mode) { this.mode = mode; }
 
         @Override
         protected void onPreExecute() {
@@ -100,21 +69,16 @@ public class ReadCardActivity extends AppCompatActivity {
 
         @Override
         protected String doInBackground(Void... voids) {
-            DESFireEV3 card = nfcManager.getCurrentCard();
-            if (card == null) {
-                error = "No hay tarjeta activa";
-                return null;
-            }
+            IDESFireEV3 card = nfcManager.getCurrentCardEV3();
+            if (card == null) { error = "No hay tarjeta activa"; return null; }
             DesfireOperations ops = new DesfireOperations(card);
             try {
                 switch (mode) {
-                    case MODE_BASIC: return readBasic(ops);
-                    case MODE_NDEF:  return readNdefContent(ops);
-                    case MODE_SDM:   return readSdm(ops);
+                    case 1: return readBasic(ops);
+                    case 2: return readNdef(ops);
+                    case 3: return readSdm(ops);
                 }
-            } catch (Exception e) {
-                error = e.getMessage();
-            }
+            } catch (Exception e) { error = e.getMessage(); }
             return null;
         }
 
@@ -133,41 +97,32 @@ public class ReadCardActivity extends AppCompatActivity {
         private String readBasic(DesfireOperations ops) throws Exception {
             StringBuilder sb = new StringBuilder();
 
-            // UID
-            byte[] uid = ops.readUid();
-            sb.append("── UID ──────────────────────\n");
-            sb.append(DesfireOperations.bytesToHex(uid)).append("\n\n");
-
-            // Versión
-            IDESFireEV1.VersionInfo version = ops.readVersion();
-            if (version != null) {
-                sb.append("── VERSIÓN ──────────────────\n");
-                sb.append("HW: v").append(version.getHWMajorVersion())
-                  .append(".").append(version.getHWMinorVersion()).append("\n");
-                sb.append("SW: v").append(version.getSWMajorVersion())
-                  .append(".").append(version.getSWMinorVersion()).append("\n\n");
+            IDESFireEV1.CardDetails details = ops.readCardDetails();
+            sb.append("── INFO TARJETA ─────────────\n");
+            if (details != null) {
+                sb.append("Nombre:      ").append(details.cardName).append("\n");
+                sb.append("Versión HW:  ").append(details.majorVersion).append(".").append(details.minorVersion).append("\n");
+                sb.append("Memoria:     ").append(details.freeMemory).append(" / ").append(details.totalMemory).append(" bytes\n");
+                sb.append("Vendor ID:   ").append(DesfireOperations.bytesToHex(new byte[]{details.vendorID})).append("\n");
             }
 
-            // Aplicaciones
             byte[][] apps = ops.readApplicationIds();
-            sb.append("── APLICACIONES (").append(apps != null ? apps.length : 0).append(") ───────\n");
+            sb.append("\n── APLICACIONES (").append(apps != null ? apps.length : 0).append(") ───────\n");
             if (apps != null) {
                 for (byte[] aid : apps) {
                     sb.append("  AID: ").append(DesfireOperations.bytesToHex(aid)).append("\n");
                 }
             }
-
             return sb.toString();
         }
 
-        private String readNdefContent(DesfireOperations ops) throws Exception {
+        private String readNdef(DesfireOperations ops) throws Exception {
             StringBuilder sb = new StringBuilder();
             sb.append("── CONTENIDO NDEF ───────────\n");
-            String url = ops.readNdefAsString();
-            sb.append(url).append("\n\n");
+            sb.append(ops.readNdefAsString()).append("\n\n");
 
-            sb.append("── RAW (hex, primeros 64 bytes) ─\n");
             byte[] raw = ops.readNdefFile();
+            sb.append("── RAW (primeros 64 bytes) ──\n");
             if (raw != null) {
                 byte[] preview = new byte[Math.min(64, raw.length)];
                 System.arraycopy(raw, 0, preview, 0, preview.length);
@@ -178,34 +133,26 @@ public class ReadCardActivity extends AppCompatActivity {
         }
 
         private String readSdm(DesfireOperations ops) throws Exception {
-            DESFireEV3File.StdEV3DataFileSettings settings = ops.readSdmSettings();
-            if (settings == null) {
-                return "No se pudo leer la configuración SDM.\n" +
-                       "(El fichero puede no existir o no estar autenticado)";
-            }
+            DESFireEV3File.StdEV3DataFileSettings s = ops.readSdmSettings();
+            if (s == null) return "No se pudo leer configuración SDM";
 
             StringBuilder sb = new StringBuilder();
             sb.append("── CONFIGURACIÓN SDM ────────\n");
-            sb.append("SDM habilitado:      ").append(settings.isSDMEnabled()).append("\n");
-            sb.append("UID mirroring:       ").append(settings.isUIDMirroringEnabled()).append("\n");
-            sb.append("Counter SDM:         ").append(settings.isSDMReadCounterEnabled()).append("\n");
-            sb.append("Counter limit:       ").append(settings.isSDMReadCounterLimitEnabled()).append("\n");
-            sb.append("Cifrado SDM:         ").append(settings.isSDMEncryptFileDataEnabled()).append("\n\n");
+            sb.append("SDM habilitado:  ").append(s.isSDMEnabled()).append("\n");
+            sb.append("UID mirroring:   ").append(s.isUIDMirroringEnabled()).append("\n");
+            sb.append("Counter SDM:     ").append(s.isSDMReadCounterEnabled()).append("\n");
+            sb.append("Counter limit:   ").append(s.isSDMReadCounterLimitEnabled()).append("\n");
+            sb.append("Cifrado SDM:     ").append(s.isSDMEncryptFileDataEnabled()).append("\n\n");
 
-            if (settings.isSDMEnabled()) {
+            if (s.isSDMEnabled()) {
                 sb.append("── OFFSETS ──────────────────\n");
-                sb.append("PICC Data offset:    ").append(settings.getPiccDataOffset()).append("\n");
-                sb.append("MAC offset:          ").append(settings.getSdmMacOffset()).append("\n");
-                sb.append("MAC input offset:    ").append(settings.getSdmMacInputOffset()).append("\n");
-                if (settings.isSDMReadCounterEnabled()) {
-                    sb.append("Counter offset:      ").append(settings.getSdmReadCounterOffset()).append("\n");
-                }
-                if (settings.isSDMEncryptFileDataEnabled()) {
-                    sb.append("Enc offset:          ").append(settings.getSdmEncryptionOffset()).append("\n");
-                    sb.append("Enc length:          ").append(settings.getSdmEncryptionLength()).append("\n");
-                }
-                if (settings.isSDMReadCounterLimitEnabled()) {
-                    sb.append("Counter limit:       ").append(settings.getSdmReadCounterLimit()).append("\n");
+                sb.append("PICC offset:     ").append(DesfireOperations.bytesToHex(s.getPiccDataOffset())).append("\n");
+                sb.append("MAC offset:      ").append(DesfireOperations.bytesToHex(s.getSdmMacOffset())).append("\n");
+                if (s.isSDMReadCounterEnabled())
+                    sb.append("Counter offset:  ").append(DesfireOperations.bytesToHex(s.getSdmReadCounterOffset())).append("\n");
+                if (s.isSDMEncryptFileDataEnabled()) {
+                    sb.append("Enc offset:      ").append(DesfireOperations.bytesToHex(s.getSdmEncryptionOffset())).append("\n");
+                    sb.append("Enc length:      ").append(DesfireOperations.bytesToHex(s.getSdmEncryptionLength())).append("\n");
                 }
             }
             return sb.toString();
