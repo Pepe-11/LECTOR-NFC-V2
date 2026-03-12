@@ -72,75 +72,38 @@ public class DesfireOperations {
 
     public void writeNdefUrl(String url) throws Exception {
 
-    // Construir mensaje NDEF
         byte[] ndefMessage = buildNdefUriMessage(url);
     
         if (ndefMessage.length > NDEF_FILE_SIZE) {
-            throw new Exception("URL demasiado larga. Máximo " + NDEF_FILE_SIZE + " bytes");
+            throw new Exception("URL demasiado larga");
         }
     
-        // Obtener IsoDep desde TapLinx
-        android.nfc.tech.IsoDep isoDep = card.getIsoDep();
+        // seleccionar aplicación NDEF
+        card.selectApplication(NDEF_AID);
     
-        if (isoDep == null) {
-            throw new Exception("IsoDep no disponible");
-        }
+        // autenticar con key 0
+        authenticateApp(null, 0);
     
-        // SELECT NDEF APPLICATION (ISO DF Name)
-        byte[] selectApp = new byte[]{
-            (byte)0x00,(byte)0xA4,(byte)0x04,(byte)0x00,
-            (byte)0x07,
-            (byte)0xD2,(byte)0x76,(byte)0x00,(byte)0x00,(byte)0x85,(byte)0x01,(byte)0x01,
-            (byte)0x00
-        };
+        // borrar contenido previo
+        byte[] empty = new byte[NDEF_FILE_SIZE];
+        card.writeData(
+            NDEF_DATA_FILE_ID,
+            0,
+            empty.length,
+            empty,
+            IDESFireEV1.CommunicationType.Plain
+        );
     
-        isoDep.transceive(selectApp);
+        // escribir mensaje NDEF
+        card.writeData(
+            NDEF_DATA_FILE_ID,
+            0,
+            ndefMessage.length,
+            ndefMessage,
+            IDESFireEV1.CommunicationType.Plain
+        );
     
-        // SELECT NDEF FILE (E104)
-        byte[] selectFile = new byte[]{
-            (byte)0x00,(byte)0xA4,(byte)0x00,(byte)0x0C,
-            (byte)0x02,
-            (byte)0xE1,(byte)0x04
-        };
-    
-        isoDep.transceive(selectFile);
-    
-        // El fichero NDEF suele tener 253 bytes útiles
-        int maxSize = 253;
-    
-        byte[] padded = new byte[maxSize];
-        System.arraycopy(ndefMessage, 0, padded, 0, ndefMessage.length);
-    
-        int offset = 0;
-    
-        while (offset < padded.length) {
-    
-            int chunk = Math.min(59, padded.length - offset);
-    
-            byte[] cmd = new byte[5 + chunk];
-    
-            cmd[0] = 0x00;
-            cmd[1] = (byte)0xD6; // UPDATE BINARY
-            cmd[2] = (byte)((offset >> 8) & 0xFF);
-            cmd[3] = (byte)(offset & 0xFF);
-            cmd[4] = (byte)chunk;
-    
-            System.arraycopy(padded, offset, cmd, 5, chunk);
-    
-            byte[] response = isoDep.transceive(cmd);
-    
-            if (response.length < 2 || response[response.length-2] != (byte)0x90 || response[response.length-1] != (byte)0x00) {
-    
-                throw new Exception("Error escribiendo NDEF (SW="
-                        + String.format("%02X%02X",
-                        response[response.length-2],
-                        response[response.length-1]) + ")");
-            }
-    
-            offset += chunk;
-        }
-    
-        Log.d(TAG, "URL NDEF escrita correctamente: " + url);
+        Log.d(TAG, "NDEF escrito correctamente: " + url);
     }
     // ─────────────────────────────────────────────────────────────────────────
     // check_card_status() — traducción fiel
