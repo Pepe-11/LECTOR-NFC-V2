@@ -4,6 +4,7 @@ import android.util.Log;
 
 import com.nxp.nfclib.KeyType;
 import com.nxp.nfclib.desfire.DESFireEV3File;
+import com.nxp.nfclib.desfire.EV3ApplicationKeySettings;
 import com.nxp.nfclib.desfire.IDESFireEV1;
 import com.nxp.nfclib.desfire.IDESFireEV3;
 import com.nxp.nfclib.defaultimpl.KeyData;
@@ -19,20 +20,24 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * Operaciones DESFire EV3 — réplica exacta del script Python nfc_writer.py
  *
- * SOLUCIÓN AL ERROR "cannot find symbol setISODFName":
- * EV3ApplicationKeySettings.Builder no expone setISODFName() en TapLinx.
- * En su lugar enviamos los comandos CreateApplication y CreateFile como
- * APDUs raw usando cardV1.sendCommand(), replicando byte a byte el script Python.
+ * SOLUCIÓN DEFINITIVA (inspeccionando el AAR real con javap):
  *
- * APDUs críticos (calculados del Python):
- *   CreateApplication con ISO DF Name:
- *     90 CA 00 00 0E  D2 76 00  0F 21  10 E1  D2 76 00 00 85 01 01  00
+ * Los ISO File IDs NO se pasan al Builder, sino como PARÁMETROS a los métodos:
  *
- *   CreateFile CC (File 01, ISO ID E103, Plain, libre, 15 bytes):
- *     90 CD 00 00 09  01  03 E1  00 E0  EE  0F 00 00  00
+ *   1. createApplication CON ISO DF Name:
+ *      cardV3.createApplication(byte[] aid, EV3ApplicationKeySettings, byte[] isoFID, byte[] dfName)
+ *      → isoFID = null (no hay FID para la app, solo DF Name)
+ *      → dfName = {D2 76 00 00 85 01 01}
  *
- *   CreateFile NDEF (File 02, ISO ID E104, Plain, libre, 255 bytes):
- *     90 CD 00 00 09  02  04 E1  00 E0  EE  FF 00 00  00
+ *   2. createFile CON ISO File ID:
+ *      cardV3.createFile(int fileNo, byte[] isoFileId, DESFireEV3File.EV3FileSettings)
+ *      → isoFileId = {E1 03} para CC,  {E1 04} para NDEF
+ *
+ *   3. StdEV3DataFileSettings constructor CON ISO ID:
+ *      new StdEV3DataFileSettings(CommunicationType, rw, r, w, car, size, ver, byte[] isoFileId)
+ *
+ * Esto es exactamente lo que hace el script Python con sus APDUs raw, pero
+ * usando la API pública del SDK — sin APDUs manuales, sin IsoDep.
  */
 public class DesfireOperations {
 
@@ -44,69 +49,43 @@ public class DesfireOperations {
     public static final int    NDEF_DATA_FILE_ID = 0x02;
     public static final int    NDEF_FILE_SIZE    = 255;
 
+    /**
+     * ISO DF Name estándar NDEF — D2 76 00 00 85 01 01
+     * Permite que los móviles seleccionen la app con:
+     *   ISO SELECT: 00 A4 04 00 07 D2 76 00 00 85 01 01
+     */
+    private static final byte[] ISO_DF_NAME = new byte[]{
+        (byte)0xD2, 0x76, 0x00, 0x00, (byte)0x85, 0x01, 0x01
+    };
+
+    /**
+     * ISO File ID del fichero CC → E1 03
+     * Permite selección ISO: 00 A4 00 0C 02 E1 03
+     */
+    private static final byte[] ISO_FILE_ID_CC   = new byte[]{(byte)0xE1, 0x03};
+
+    /**
+     * ISO File ID del fichero NDEF → E1 04  ← EL MÁS CRÍTICO
+     * Permite selección ISO: 00 A4 00 0C 02 E1 04
+     * Sin este ID los móviles no pueden leer el NDEF.
+     */
+    private static final byte[] ISO_FILE_ID_NDEF = new byte[]{(byte)0xE1, 0x04};
+
     // Claves de fábrica
     public static final byte[] DEFAULT_KEY_AES = new byte[16]; // 16 x 0x00
     public static final byte[] DEFAULT_KEY_DES = new byte[8];  // 8  x 0x00
 
-    // CC correcto — apunta a ISO File ID E104
+    // CC correcto — apunta a E1 04
     private static final byte[] CC_DATA = new byte[]{
         0x00, 0x0F,              // Tamaño CC: 15 bytes
         0x20,                    // Versión NDEF 2.0
         0x00, 0x7F,              // Max lectura
         0x00, 0x73,              // Max escritura
         0x04, 0x06,              // NDEF File Control TLV
-        (byte)0xE1, 0x04,        // ISO File ID E104 ← clave para móviles
+        (byte)0xE1, 0x04,        // ← ISO File ID E104
         0x00, (byte)0xFF,        // Max NDEF: 255 bytes
         0x00,                    // Lectura libre
         0x00                     // Escritura libre
-    };
-
-    // ── APDUs raw (idénticos al script Python) ────────────────────────────────
-
-    /**
-     * CreateApplication con ISO DF Name D2760000850101
-     * Python: payload = DESFIRE_AID + [0x0F, 0x21] + [0x10, 0xE1] + ISO_DF_NAME
-     *         cmd = [0x90, 0xCA, 0x00, 0x00, len(payload)] + payload + [0x00]
-     * Resultado: 90 CA 00 00 0E D2 76 00 0F 21 10 E1 D2 76 00 00 85 01 01 00
-     */
-    private static final byte[] APDU_CREATE_APP_ISO = new byte[]{
-        (byte)0x90, (byte)0xCA, 0x00, 0x00, 0x0E,
-        (byte)0xD2, 0x76, 0x00,                    // AID
-        0x0F,                                       // KeySettings1
-        0x21,                                       // KeySettings2: AES + ISO File IDs habilitados
-        0x10, (byte)0xE1,                           // flags ISO DF Name
-        (byte)0xD2, 0x76, 0x00, 0x00, (byte)0x85, 0x01, 0x01, // ISO DF Name
-        0x00
-    };
-
-    /**
-     * CreateFile CC: File 01, ISO ID E103, Plain, acceso EE (libre), 15 bytes
-     * Python: [0x90, 0xCD, 0x00, 0x00, 0x09, 0x01, 0x03, 0xE1, 0x00, 0xE0, 0xEE, 0x0F, 0x00, 0x00, 0x00]
-     */
-    private static final byte[] APDU_CREATE_FILE_CC = new byte[]{
-        (byte)0x90, (byte)0xCD, 0x00, 0x00, 0x09,
-        0x01,                    // File No = 01
-        0x03, (byte)0xE1,        // ISO File ID = E103
-        0x00,                    // Communication: Plain
-        (byte)0xE0,              // Access rights byte 1
-        (byte)0xEE,              // Access rights byte 2
-        0x0F, 0x00, 0x00,        // File size = 15 bytes (little-endian)
-        0x00
-    };
-
-    /**
-     * CreateFile NDEF: File 02, ISO ID E104, Plain, acceso EE (libre), 255 bytes
-     * Python: [0x90, 0xCD, 0x00, 0x00, 0x09, 0x02, 0x04, 0xE1, 0x00, 0xE0, 0xEE, 0xFF, 0x00, 0x00, 0x00]
-     */
-    private static final byte[] APDU_CREATE_FILE_NDEF = new byte[]{
-        (byte)0x90, (byte)0xCD, 0x00, 0x00, 0x09,
-        0x02,                    // File No = 02
-        0x04, (byte)0xE1,        // ISO File ID = E104
-        0x00,                    // Communication: Plain
-        (byte)0xE0,              // Access rights byte 1
-        (byte)0xEE,              // Access rights byte 2
-        (byte)0xFF, 0x00, 0x00,  // File size = 255 bytes (little-endian)
-        0x00
     };
 
     private final IDESFireEV1 cardV1;
@@ -121,32 +100,6 @@ public class DesfireOperations {
     public DesfireOperations() {
         this.cardV3 = null;
         this.cardV1 = null;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // ENVÍO DE APDU RAW via TapLinx
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Envía un APDU raw usando cardV1.sendCommand().
-     * TapLinx devuelve la respuesta con SW1 SW2 al final.
-     * Lanza excepción si SW != 9000 / 9100.
-     */
-    private byte[] sendRaw(byte[] apdu, String desc) throws Exception {
-        byte[] response = cardV1.sendCommand(apdu);
-        if (response == null || response.length < 2) {
-            throw new Exception(desc + ": respuesta vacía del SDK");
-        }
-        int sw1 = response[response.length - 2] & 0xFF;
-        int sw2 = response[response.length - 1] & 0xFF;
-        boolean ok = (sw1 == 0x91 && sw2 == 0x00)
-                  || (sw1 == 0x90 && sw2 == 0x00)
-                  || (sw1 == 0x91 && sw2 == 0xAF);
-        if (!ok) {
-            throw new Exception(desc + " fallido: SW " + String.format("%02X %02X", sw1, sw2));
-        }
-        Log.d(TAG, desc + " OK (SW " + String.format("%02X %02X", sw1, sw2) + ")");
-        return response;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -198,7 +151,7 @@ public class DesfireOperations {
             Log.d(TAG, "Auth PICC DES OK");
             return true;
         } catch (Exception e) {
-            throw new Exception("No se pudo autenticar en el PICC. Clave no reconocida.");
+            throw new Exception("No se pudo autenticar en el PICC.");
         }
     }
 
@@ -217,16 +170,20 @@ public class DesfireOperations {
             Log.d(TAG, "Auth App DES OK");
             return true;
         } catch (Exception e) {
-            throw new Exception("No se pudo autenticar en la app. Clave no reconocida.");
+            throw new Exception("No se pudo autenticar en la app.");
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CREAR APLICACIÓN NDEF CON ISO FILE IDs (APDUs raw — igual que Python)
+    // CREAR APLICACIÓN NDEF CON ISO DF NAME + ISO FILE IDs
+    //
+    // Firma real del SDK (verificada con javap en el AAR):
+    //   IDESFireEV3.createApplication(byte[] aid, EV3ApplicationKeySettings, byte[] isoFID, byte[] dfName)
+    //   IDESFireEV3.createFile(int fileNo, byte[] isoFileId, EV3FileSettings)
     // ─────────────────────────────────────────────────────────────────────────
 
     public void createNdefApp(byte[] appMasterKey) throws Exception {
-        Log.i(TAG, "=== createNdefApp (APDUs raw con ISO DF Name + ISO File IDs) ===");
+        Log.i(TAG, "=== createNdefApp con ISO DF Name + ISO File IDs ===");
 
         // 1. Seleccionar Master App y autenticar
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
@@ -238,7 +195,6 @@ public class DesfireOperations {
         for (byte[] aid : apps) {
             if (Arrays.equals(aid, NDEF_AID)) { appExists = true; break; }
         }
-
         if (appExists) {
             Log.w(TAG, "App NDEF existe — borrando para recrear con ISO IDs");
             cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
@@ -263,11 +219,23 @@ public class DesfireOperations {
             }
         }
 
-        // 3. CreateApplication con ISO DF Name — APDU raw
-        //    90 CA 00 00 0E  D2 76 00  0F 21  10 E1  D2 76 00 00 85 01 01  00
-        sendRaw(APDU_CREATE_APP_ISO, "CreateApplication con ISO DF Name");
+        // 3. Crear la aplicación con ISO DF Name
+        //    Firma: createApplication(byte[] aid, EV3ApplicationKeySettings, byte[] isoFID, byte[] dfName)
+        //    isoFID = null → la app no tiene ISO File Identifier propio, solo DF Name
+        //    dfName = D2 76 00 00 85 01 01 → nombre estándar NDEF
+        EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
+            .setKeyTypeOfApplicationKeys(KeyType.AES128)
+            .setMaxNumberOfApplicationKeys(2)
+            .setAppMasterKeyChangeable(true)
+            .setAppKeySettingsChangeable(true)
+            .setAuthenticationRequiredForFileManagement(false)
+            .setIsoFileIdentifierPresent(true)  // ← habilita el campo ISO en el APDU
+            .build();
 
-        // 4. Seleccionar nueva app y autenticar con AES
+        cardV3.createApplication(NDEF_AID, keySettings, null, ISO_DF_NAME);
+        Log.d(TAG, "App NDEF creada con ISO DF Name: " + bytesToHex(ISO_DF_NAME));
+
+        // 4. Seleccionar la nueva app y autenticar con AES
         cardV1.selectApplication(NDEF_AID);
         cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
             buildKeyData(DEFAULT_KEY_AES, "AES"));
@@ -276,21 +244,18 @@ public class DesfireOperations {
             cardV1.changeKey(0, KeyType.AES128, appMasterKey, DEFAULT_KEY_AES, (byte)0x01);
         }
 
-        // 5. CreateFile CC con ISO ID E103 — APDU raw
-        //    90 CD 00 00 09  01  03 E1  00 E0 EE  0F 00 00  00
-        sendRaw(APDU_CREATE_FILE_CC, "CreateFile CC (ISO E103)");
+        // 5. Crear File CC con ISO File ID E103
+        //    Firma: createFile(int fileNo, byte[] isoFileId, EV3FileSettings)
+        createCapabilityContainerFile();
 
-        // 6. CreateFile NDEF con ISO ID E104 — APDU raw
-        //    90 CD 00 00 09  02  04 E1  00 E0 EE  FF 00 00  00
-        sendRaw(APDU_CREATE_FILE_NDEF, "CreateFile NDEF (ISO E104)");
+        // 6. Crear File NDEF con ISO File ID E104
+        createNdefDataFile();
 
-        // 7. Escribir CC
+        // 7. Escribir CC y NDEF vacío
         cardV1.writeData(NDEF_CC_FILE_ID, 0, CC_DATA);
-
-        // 8. Inicializar NDEF vacío
         cardV1.writeData(NDEF_DATA_FILE_ID, 0, new byte[]{0x00, 0x00});
 
-        Log.i(TAG, "=== App NDEF lista con ISO File IDs — móviles pueden leerla ===");
+        Log.i(TAG, "=== App NDEF lista — tarjeta legible por móviles ===");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -312,7 +277,7 @@ public class DesfireOperations {
             wasDes = authenticateAppAuto(null, 0);
             authOk = true;
         } catch (Exception e) {
-            Log.w(TAG, "Auth falló — intentando escritura sin auth (acceso libre EE): " + e.getMessage());
+            Log.w(TAG, "Auth falló — intentando escritura directa: " + e.getMessage());
         }
 
         if (authOk && wasDes) {
@@ -335,7 +300,6 @@ public class DesfireOperations {
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
         cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
             buildKeyData(DEFAULT_KEY_DES, "DES"));
-
         try { cardV1.deleteApplication(NDEF_AID); } catch (Exception e) {
             Log.w(TAG, "deleteApplication: " + e.getMessage());
         }
@@ -344,14 +308,24 @@ public class DesfireOperations {
         cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
             buildKeyData(DEFAULT_KEY_DES, "DES"));
 
-        sendRaw(APDU_CREATE_APP_ISO, "CreateApplication ISO (reformat)");
+        // Crear app con ISO DF Name
+        EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
+            .setKeyTypeOfApplicationKeys(KeyType.AES128)
+            .setMaxNumberOfApplicationKeys(2)
+            .setAppMasterKeyChangeable(true)
+            .setAppKeySettingsChangeable(true)
+            .setAuthenticationRequiredForFileManagement(false)
+            .setIsoFileIdentifierPresent(true)
+            .build();
+
+        cardV3.createApplication(NDEF_AID, keySettings, null, ISO_DF_NAME);
 
         cardV1.selectApplication(NDEF_AID);
         cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
             buildKeyData(DEFAULT_KEY_AES, "AES"));
 
-        sendRaw(APDU_CREATE_FILE_CC,   "CreateFile CC (reformat)");
-        sendRaw(APDU_CREATE_FILE_NDEF, "CreateFile NDEF (reformat)");
+        createCapabilityContainerFile();
+        createNdefDataFile();
 
         cardV1.writeData(NDEF_CC_FILE_ID, 0, CC_DATA);
         cardV1.writeData(NDEF_DATA_FILE_ID, 0, buildNdefUriMessage(url));
@@ -421,7 +395,7 @@ public class DesfireOperations {
             ds.setSdmEncryptionLength(intTo3Bytes(config.getSdmEncLength()));
         }
         ds.setSdmMacOffset(intTo3Bytes(config.getSdmMacOffset()));
-        // MacInputOffset = inicio del NDEF (byte 2, después de los 2 bytes NLEN)
+        // MacInputOffset = inicio del NDEF (byte 2, tras los 2 bytes NLEN)
         ds.setSdmMacInputOffset(intTo3Bytes(2));
         ds.setSdmAccessRights(new byte[]{config.getSdmAccessRights(), config.getSdmAccessRights()});
 
@@ -460,17 +434,6 @@ public class DesfireOperations {
 
     // ─────────────────────────────────────────────────────────────────────────
     // CALCULAR OFFSETS SDM
-    //
-    // Layout fichero NDEF desde byte 0:
-    //   [0-1] NLEN big-endian — longitud del NDEF record
-    //   [2]   0xD1 — MB/ME/SR/TNF flags
-    //   [3]   0x01 — Type Length
-    //   [4]   payload length
-    //   [5]   0x55 — Type 'U' (URI)
-    //   [6]   URI Identifier Code (0x04=https://)
-    //   [7..] URL sin prefijo
-    //
-    // BASE = 7 → primer byte de la URL sin prefijo en el fichero
     // ─────────────────────────────────────────────────────────────────────────
 
     public void calculateSdmOffsets(String url, SdmConfig config) {
@@ -480,13 +443,13 @@ public class DesfireOperations {
         else if (url.startsWith("http://www."))  prefixLen = 11;
         else if (url.startsWith("http://"))      prefixLen = 7;
 
+        // NLEN(2) + D1(1) + TypeLen(1) + PayloadLen(1) + 'U'(1) + UriId(1) = 7
         final int BASE = 7;
 
         int piccPos = url.indexOf("00000000000000000000000000000000");
         if (piccPos >= 0) config.setPiccDataOffset(BASE + (piccPos - prefixLen));
 
-        String u2 = url.replace("00000000000000000000000000000000",
-                                 "################################");
+        String u2 = url.replace("00000000000000000000000000000000", "################################");
         int macPos = u2.indexOf("0000000000000000");
         if (macPos >= 0) config.setSdmMacOffset(BASE + (macPos - prefixLen));
 
@@ -494,13 +457,66 @@ public class DesfireOperations {
         int ctrPos = u3.indexOf("000000");
         if (ctrPos >= 0) config.setSdmReadCounterOffset(BASE + (ctrPos - prefixLen));
 
-        Log.d(TAG, "Offsets calculados: PICC=" + config.getPiccDataOffset()
+        Log.d(TAG, "Offsets: PICC=" + config.getPiccDataOffset()
             + " MAC=" + config.getSdmMacOffset()
             + " CTR=" + config.getSdmReadCounterOffset());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // HELPERS PRIVADOS
+    // HELPERS PRIVADOS — Creación de ficheros
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Crea File CC (File 01) con ISO File ID E103.
+     *
+     * Firma SDK usada:
+     *   cardV3.createFile(int fileNo, byte[] isoFileId, DESFireEV3File.EV3FileSettings)
+     *
+     * Constructor StdEV3DataFileSettings con ISO ID:
+     *   new StdEV3DataFileSettings(CommType, rw, r, w, car, size, ver, byte[] isoFileId)
+     */
+    private void createCapabilityContainerFile() throws Exception {
+        DESFireEV3File.StdEV3DataFileSettings ccSettings =
+            new DESFireEV3File.StdEV3DataFileSettings(
+                IDESFireEV1.CommunicationType.Plain,
+                (byte)0xEE,   // Read&Write: libre
+                (byte)0xEE,   // Read: libre
+                (byte)0x00,   // Write: clave 0
+                (byte)0xEE,   // ChangeAccessRights: libre
+                15,           // Tamaño: 15 bytes
+                (byte)0x00,   // versión
+                ISO_FILE_ID_CC // ← ISO File ID E103
+            );
+        // Usar createFile CON ISO File ID como segundo parámetro
+        cardV3.createFile(NDEF_CC_FILE_ID, ISO_FILE_ID_CC, ccSettings);
+        Log.d(TAG, "File CC creado con ISO ID E103");
+    }
+
+    /**
+     * Crea File NDEF (File 02) con ISO File ID E104.
+     *
+     * Sin este ISO ID los móviles no pueden seleccionar el fichero NDEF
+     * y por tanto no pueden leer ni escribir NDEF por la vía estándar.
+     */
+    private void createNdefDataFile() throws Exception {
+        DESFireEV3File.StdEV3DataFileSettings ndefSettings =
+            new DESFireEV3File.StdEV3DataFileSettings(
+                IDESFireEV1.CommunicationType.Plain,
+                (byte)0xEE,      // Read&Write: libre
+                (byte)0xEE,      // Read: libre
+                (byte)0x00,      // Write: clave 0
+                (byte)0xEE,      // ChangeAccessRights: libre
+                NDEF_FILE_SIZE,  // 255 bytes
+                (byte)0x00,      // versión
+                ISO_FILE_ID_NDEF // ← ISO File ID E104
+            );
+        // Usar createFile CON ISO File ID como segundo parámetro
+        cardV3.createFile(NDEF_DATA_FILE_ID, ISO_FILE_ID_NDEF, ndefSettings);
+        Log.d(TAG, "File NDEF creado con ISO ID E104");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPERS PRIVADOS — NDEF
     // ─────────────────────────────────────────────────────────────────────────
 
     private byte[] buildNdefUriMessage(String url) {
