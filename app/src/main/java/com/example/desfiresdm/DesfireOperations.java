@@ -71,38 +71,77 @@ public class DesfireOperations {
     // ─────────────────────────────────────────────────────────────────────────
 
     public void writeNdefUrl(String url) throws Exception {
-        if (url == null || url.isEmpty())
-            throw new Exception("La URL no puede estar vacía.");
 
-        byte[] ndefData = buildUri(url);
-        if (ndefData.length > NDEF_FILE_SIZE)
-            throw new Exception("URL demasiado larga (" + ndefData.length + " bytes, máx " + NDEF_FILE_SIZE + ").");
-
-        Log.i(TAG, "writeNdefUrl: " + url);
-
-        String status = checkCardStatus();
-        Log.i(TAG, "Estado tarjeta: " + status);
-
-        switch (status) {
-            case "ready":
-                Log.i(TAG, "Tarjeta lista — escribiendo directamente.");
-                break;
-            case "needs_cc":
-                Log.w(TAG, "CC incorrecto — corrigiendo...");
-                corregirCC();
-                break;
-            case "needs_format":
-                Log.w(TAG, "Tarjeta sin formato ISO — formateando...");
-                formatear();
-                break;
-            default:
-                throw new Exception("Estado desconocido: " + status);
+    // Construir mensaje NDEF
+        byte[] ndefMessage = buildNdefUriMessage(url);
+    
+        if (ndefMessage.length > NDEF_FILE_SIZE) {
+            throw new Exception("URL demasiado larga. Máximo " + NDEF_FILE_SIZE + " bytes");
         }
-
-        escribir(ndefData);
-        Log.i(TAG, "URL escrita OK: " + url);
+    
+        // Obtener IsoDep desde TapLinx
+        android.nfc.tech.IsoDep isoDep = card.getIsoDep();
+    
+        if (isoDep == null) {
+            throw new Exception("IsoDep no disponible");
+        }
+    
+        // SELECT NDEF APPLICATION (ISO DF Name)
+        byte[] selectApp = new byte[]{
+            (byte)0x00,(byte)0xA4,(byte)0x04,(byte)0x00,
+            (byte)0x07,
+            (byte)0xD2,(byte)0x76,(byte)0x00,(byte)0x00,(byte)0x85,(byte)0x01,(byte)0x01,
+            (byte)0x00
+        };
+    
+        isoDep.transceive(selectApp);
+    
+        // SELECT NDEF FILE (E104)
+        byte[] selectFile = new byte[]{
+            (byte)0x00,(byte)0xA4,(byte)0x00,(byte)0x0C,
+            (byte)0x02,
+            (byte)0xE1,(byte)0x04
+        };
+    
+        isoDep.transceive(selectFile);
+    
+        // El fichero NDEF suele tener 253 bytes útiles
+        int maxSize = 253;
+    
+        byte[] padded = new byte[maxSize];
+        System.arraycopy(ndefMessage, 0, padded, 0, ndefMessage.length);
+    
+        int offset = 0;
+    
+        while (offset < padded.length) {
+    
+            int chunk = Math.min(59, padded.length - offset);
+    
+            byte[] cmd = new byte[5 + chunk];
+    
+            cmd[0] = 0x00;
+            cmd[1] = (byte)0xD6; // UPDATE BINARY
+            cmd[2] = (byte)((offset >> 8) & 0xFF);
+            cmd[3] = (byte)(offset & 0xFF);
+            cmd[4] = (byte)chunk;
+    
+            System.arraycopy(padded, offset, cmd, 5, chunk);
+    
+            byte[] response = isoDep.transceive(cmd);
+    
+            if (response.length < 2 || response[response.length-2] != (byte)0x90 || response[response.length-1] != (byte)0x00) {
+    
+                throw new Exception("Error escribiendo NDEF (SW="
+                        + String.format("%02X%02X",
+                        response[response.length-2],
+                        response[response.length-1]) + ")");
+            }
+    
+            offset += chunk;
+        }
+    
+        Log.d(TAG, "URL NDEF escrita correctamente: " + url);
     }
-
     // ─────────────────────────────────────────────────────────────────────────
     // check_card_status() — traducción fiel
     // ─────────────────────────────────────────────────────────────────────────
