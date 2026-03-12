@@ -30,9 +30,9 @@ public class WriteUrlActivity extends AppCompatActivity {
     private NfcManager nfcManager;
 
     private static final String EXAMPLE_URL_FULL =
-        "https://sdm.nfctron.com/st?p=00000000000000000000000000000000&amp;m=0000000000000000";
+        "https://soporte.gcalidad.com/st?p=00000000000000000000000000000000&amp;m=0000000000000000";
     private static final String EXAMPLE_URL_MAC =
-        "https://sdm.nfctron.com/st?m=0000000000000000";
+        "https://soporte.gcalidad.com/st?m=0000000000000000";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,7 +54,7 @@ public class WriteUrlActivity extends AppCompatActivity {
         tvResult            = findViewById(R.id.tv_result);
 
         nfcManager = NfcManager.getInstance();
-        etUrl.setText("https://sdm.nfctron.com/st?p=00000000000000000000000000000000&m=0000000000000000");
+        etUrl.setText("https://soporte.gcalidad.com/st?p=00000000000000000000000000000000&m=0000000000000000");
 
         btnWrite.setOnClickListener(v -> confirmAndWrite());
         btnPreview.setOnClickListener(v -> previewNdef());
@@ -101,8 +101,8 @@ public class WriteUrlActivity extends AppCompatActivity {
             .setTitle("Insertar placeholder SDM")
             .setItems(options, (d, which) -> {
                 switch (which) {
-                    case 0: etUrl.setText("https://sdm.nfctron.com/st?p=00000000000000000000000000000000&m=0000000000000000"); break;
-                    case 1: etUrl.setText("https://sdm.nfctron.com/st?m=0000000000000000"); break;
+                    case 0: etUrl.setText("https://soporte.gcalidad.com/st?p=00000000000000000000000000000000&m=0000000000000000"); break;
+                    case 1: etUrl.setText("https://soporte.gcalidad.com/st?m=0000000000000000"); break;
                     case 2: insertAtCursor("00000000000000000000000000000000"); break;
                     case 3: insertAtCursor("0000000000000000"); break;
                     case 4: insertAtCursor("000000"); break;
