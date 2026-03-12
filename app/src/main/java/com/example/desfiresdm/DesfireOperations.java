@@ -240,6 +240,12 @@ public class DesfireOperations {
         return cardV1.getCardDetails();
     }
 
+    /** Devuelve los AIDs de todas las aplicaciones en la tarjeta */
+    public int[] getApplicationIDs() throws Exception {
+        cardV1.selectApplication(MASTER_AID);
+        return cardV1.getApplicationIDs();
+    }
+
     public byte[] readNdefRaw() throws Exception {
         cardV1.selectApplication(NDEF_AID);
         return cardV1.readData(NDEF_FILE_ID, 0, 0);
