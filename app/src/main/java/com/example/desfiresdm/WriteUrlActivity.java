@@ -5,7 +5,6 @@ import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -28,11 +27,6 @@ public class WriteUrlActivity extends AppCompatActivity {
 
     private NfcManager nfcManager;
 
-    private static final String EXAMPLE_URL_FULL =
-        "https://soporte.gcalidad.com/st?p=00000000000000000000000000000000&amp;m=0000000000000000";
-    private static final String EXAMPLE_URL_MAC =
-        "https://soporte.gcalidad.com/st?m=0000000000000000";
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -43,14 +37,13 @@ public class WriteUrlActivity extends AppCompatActivity {
             getSupportActionBar().setTitle("Escribir URL NDEF");
         }
 
-        etUrl               = findViewById(R.id.et_url);
-        etAppKey            = findViewById(R.id.et_app_key);
-        switchCreateApp     = findViewById(R.id.switch_create_app);
-        btnWrite            = findViewById(R.id.btn_write);
-        btnPreview          = findViewById(R.id.btn_preview);
+        etUrl                 = findViewById(R.id.et_url);
+        etAppKey              = findViewById(R.id.et_app_key);
+        btnWrite              = findViewById(R.id.btn_write);
+        btnPreview            = findViewById(R.id.btn_preview);
         btnInsertPlaceholders = findViewById(R.id.btn_insert_placeholders);
-        progressBar         = findViewById(R.id.progress_bar);
-        tvResult            = findViewById(R.id.tv_result);
+        progressBar           = findViewById(R.id.progress_bar);
+        tvResult              = findViewById(R.id.tv_result);
 
         nfcManager = NfcManager.getInstance();
         etUrl.setText("https://soporte.gcalidad.com/st?p=00000000000000000000000000000000&m=0000000000000000");
@@ -95,7 +88,13 @@ public class WriteUrlActivity extends AppCompatActivity {
     }
 
     private void showPlaceholderMenu() {
-        String[] options = {"URL completa (PICC + MAC)", "URL solo MAC", "PICC placeholder (32 ceros)", "MAC placeholder (16 ceros)", "Counter placeholder (6 ceros)"};
+        String[] options = {
+            "URL completa (PICC + MAC)",
+            "URL solo MAC",
+            "PICC placeholder (32 ceros)",
+            "MAC placeholder (16 ceros)",
+            "Counter placeholder (6 ceros)"
+        };
         new AlertDialog.Builder(this)
             .setTitle("Insertar placeholder SDM")
             .setItems(options, (d, which) -> {
@@ -116,7 +115,8 @@ public class WriteUrlActivity extends AppCompatActivity {
     }
 
     private int estimateNdefSize(String url) {
-        String stripped = url.startsWith("https://") ? url.substring(8) : (url.startsWith("http://") ? url.substring(7) : url);
+        String stripped = url.startsWith("https://") ? url.substring(8)
+            : (url.startsWith("http://") ? url.substring(7) : url);
         return 2 + 4 + 1 + stripped.getBytes().length;
     }
 
@@ -143,7 +143,7 @@ public class WriteUrlActivity extends AppCompatActivity {
             if (card == null) { errorMsg = "No hay tarjeta activa"; return null; }
             DesfireOperations ops = new DesfireOperations(card);
             try {
-                if (switchCreateApp.isChecked()) ops.createNdefApp(null);
+                // writeNdefUrl detecta automáticamente si necesita crear/recrear la app
                 ops.writeNdefUrl(url);
                 return "✅ URL escrita\n\n" + url;
             } catch (Exception e) { errorMsg = e.getMessage(); return null; }
