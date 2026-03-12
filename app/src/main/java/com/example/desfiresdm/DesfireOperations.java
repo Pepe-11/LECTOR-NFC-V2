@@ -304,12 +304,41 @@ public class DesfireOperations {
 
     public void configureSdm(SdmConfig config) throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        boolean wasDes = authenticateAppAuto(null, 0);
+
+        // Intentar auth AES primero. Si la tarjeta está en DES (formateada con script Python),
+        // hay que migrar a AES antes de poder configurar SDM (SDM requiere AES en EV3).
+        boolean wasDes = false;
+        try {
+            wasDes = authenticateAppAuto(null, 0);
+        } catch (Exception e) {
+            throw new Exception("No se pudo autenticar para SDM: " + e.getMessage());
+        }
 
         if (wasDes) {
-            throw new Exception(
-                "La tarjeta está en formato DES. Escribe primero una URL para migrarla a AES, " +
-                "luego aplica el SDM.");
+            // Tarjeta en DES: leer la URL actual, reformatear a AES y luego aplicar SDM
+            Log.i(TAG, "Tarjeta DES — migrando a AES antes de configurar SDM...");
+            // Leer URL actual del archivo NDEF para no perderla
+            String currentUrl = null;
+            try {
+                byte[] raw = cardV1.readData(NDEF_DATA_FILE_ID, 0, 0);
+                if (raw != null && raw.length > 2) {
+                    int ndefLen = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
+                    if (ndefLen > 0) currentUrl = parseNdefUriRecord(raw, 2, ndefLen);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "No se pudo leer URL actual: " + e.getMessage());
+            }
+            if (currentUrl == null || currentUrl.isEmpty()) {
+                throw new Exception(
+                    "La tarjeta está en formato DES y no contiene URL. " +
+                    "Escribe primero una URL para migrarla a AES, luego aplica el SDM.");
+            }
+            reformatCardToAes(currentUrl);
+            // Tras reformatear, re-autenticar con AES para continuar con SDM
+            cardV1.selectApplication(NDEF_AID);
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
+                buildKeyData(DEFAULT_KEY_AES, "AES"));
+            Log.i(TAG, "Migración DES→AES completada, configurando SDM...");
         }
 
         DESFireEV3File.EV3FileSettings settings = cardV3.getDESFireEV3FileSettings(NDEF_DATA_FILE_ID);
@@ -364,7 +393,9 @@ public class DesfireOperations {
 
     public DESFireEV3File.StdEV3DataFileSettings readSdmSettings() throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        authenticateAppAuto(null, 0);
+        try { authenticateAppAuto(null, 0); } catch (Exception e) {
+            Log.w(TAG, "Auth opcional para readSdmSettings: " + e.getMessage());
+        }
         DESFireEV3File.EV3FileSettings settings = cardV3.getDESFireEV3FileSettings(NDEF_DATA_FILE_ID);
         if (settings instanceof DESFireEV3File.StdEV3DataFileSettings) {
             return (DESFireEV3File.StdEV3DataFileSettings) settings;
