@@ -20,7 +20,6 @@ public class WriteUrlActivity extends AppCompatActivity {
 
     private EditText etUrl;
     private EditText etAppKey;
-    private CheckBox switchCreateApp;
     private Button btnWrite;
     private Button btnPreview;
     private Button btnInsertPlaceholders;
