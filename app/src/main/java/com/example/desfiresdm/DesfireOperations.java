@@ -169,18 +169,29 @@ public class DesfireOperations {
             throw new Exception("URL demasiado larga (" + ndefMessage.length + " bytes).");
         }
 
-        // Paso 1: seleccionar app NDEF y autenticar (detecta DES o AES)
+        // Paso 1: seleccionar app NDEF
         cardV1.selectApplication(NDEF_AID);
-        boolean wasDes = authenticateAppAuto(null, 0);
 
-        if (wasDes) {
-            // La tarjeta está en DES — necesita reformateo completo a AES
+        // Paso 2: intentar autenticación (detecta DES o AES)
+        // Si la tarjeta fue formateada con el script Python con access rights 0xEE (libre),
+        // la auth puede fallar pero la escritura puede funcionar igualmente.
+        boolean wasDes = false;
+        boolean authOk = false;
+        try {
+            wasDes = authenticateAppAuto(null, 0);
+            authOk = true;
+        } catch (Exception e) {
+            Log.w(TAG, "Auth falló, intentando escritura sin auth (tarjeta acceso libre): " + e.getMessage());
+        }
+
+        if (authOk && wasDes) {
+            // La tarjeta está en DES — reformateo completo a AES
             Log.i(TAG, "Tarjeta DES detectada — reformateando a AES...");
             reformatCardToAes(url);
             return;
         }
 
-        // Tarjeta ya en AES — escribir directamente
+        // Escribir directamente (AES autenticado o acceso libre)
         cardV1.writeData(NDEF_DATA_FILE_ID, 0, ndefMessage);
         Log.d(TAG, "URL escrita: " + url);
     }
@@ -463,11 +474,26 @@ public class DesfireOperations {
      * Construye IKeyData a partir de un byte[] de clave.
      * AAR confirma: KeyData() constructor vacío + setKey(java.security.Key)
      *
-     * @param keyBytes bytes de la clave
+     * Para DES de 8 bytes (tarjetas formateadas con script Python con clave de fábrica 00..00):
+     * DESFire usa "DES nativo" que TapLinx mapea a THREEDES/DESede.
+     * Java exige claves DESede de 16 o 24 bytes, así que replicamos los 8 bytes: K||K||K.
+     *
+     * @param keyBytes bytes de la clave (8 para DES, 16 para AES-128)
      * @param algorithm "AES" para AES-128, "DES" para DES de 8 bytes
      */
     private IKeyData buildKeyData(byte[] keyBytes, String algorithm) throws Exception {
-        SecretKey secretKey = new SecretKeySpec(keyBytes, algorithm);
+        SecretKey secretKey;
+        if ("DES".equals(algorithm)) {
+            // Convertir DES 8 bytes → DESede 24 bytes (K||K||K)
+            // Esto es lo que DESFire llama "Single DES" (clave de fábrica)
+            byte[] desEde = new byte[24];
+            System.arraycopy(keyBytes, 0, desEde, 0,  8);
+            System.arraycopy(keyBytes, 0, desEde, 8,  8);
+            System.arraycopy(keyBytes, 0, desEde, 16, 8);
+            secretKey = new SecretKeySpec(desEde, "DESede");
+        } else {
+            secretKey = new SecretKeySpec(keyBytes, algorithm);
+        }
         KeyData keyData = new KeyData();
         keyData.setKey(secretKey);
         return keyData;
