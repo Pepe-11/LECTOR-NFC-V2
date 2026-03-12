@@ -18,24 +18,25 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * Operaciones DESFire EV3 — basado en inspección directa del AAR NxpNfcAndroidLib-release.
+ * Operaciones DESFire EV3.
  *
- * Hallazgos del AAR:
- *  - KeyData(java.security.Key) es el único constructor público → wrappear byte[] como SecretKeySpec
- *  - EV3ApplicationKeySettings.Builder setters devuelven Builder (fluent) → se pueden encadenar
- *  - createEV3ApplicationKeySettings(byte[]) es package-private → usar new Builder() en su lugar
- *  - authenticate(int, AuthType, KeyType, IKeyData) es la firma correcta
+ * Detección automática de clave:
+ *  - Tarjetas formateadas con el script Python usan DES 8 bytes (clave fábrica 00..00)
+ *  - Tarjetas nuevas o formateadas con esta app usan AES-128 16 bytes (clave fábrica 00..00)
+ *  - La app prueba AES primero, luego DES, y si la tarjeta está en DES la reformatea a AES
+ *    para que el SDM funcione correctamente (SDM requiere AES en DESFire EV3)
  */
 public class DesfireOperations {
 
     private static final String TAG = "DesfireOps";
 
-    // AID DESFire = 3 bytes obligatorio
+    // AID DESFire = siempre 3 bytes
     public static final byte[] NDEF_AID          = new byte[]{(byte)0xD2, 0x76, 0x00};
     public static final int    NDEF_CC_FILE_ID   = 0x01;
     public static final int    NDEF_DATA_FILE_ID = 0x02;
     public static final int    NDEF_FILE_SIZE    = 255;
-    public static final byte[] DEFAULT_KEY       = new byte[16]; // AES-128 todo ceros
+    public static final byte[] DEFAULT_KEY_AES   = new byte[16]; // 16 x 0x00
+    public static final byte[] DEFAULT_KEY_DES   = new byte[8];  // 8  x 0x00
 
     // CC correcto con ISO File ID 0xE104 — imprescindible para que los móviles lean NDEF
     private static final byte[] CC_DATA = new byte[]{
@@ -44,7 +45,7 @@ public class DesfireOperations {
         0x00, 0x7F,              // Max lectura
         0x00, 0x73,              // Max escritura
         0x04, 0x06,              // NDEF File Control TLV
-        (byte)0xE1, 0x04,        // ISO File ID 0xE104 ← clave para móviles NFC
+        (byte)0xE1, 0x04,        // ISO File ID 0xE104 — clave para móviles NFC
         0x00, (byte)0xFF,        // Max NDEF: 255 bytes
         0x00,                    // Lectura libre
         0x00                     // Escritura libre
@@ -58,6 +59,7 @@ public class DesfireOperations {
         this.cardV1 = card;
     }
 
+    /** Constructor sin tarjeta (solo para calcular offsets en preview) */
     public DesfireOperations() {
         this.cardV3 = null;
         this.cardV1 = null;
@@ -73,7 +75,7 @@ public class DesfireOperations {
 
     @SuppressWarnings("unchecked")
     public ArrayList<byte[]> readApplicationIds() throws Exception {
-        // TapLinx exige seleccionar app maestra (000000) antes de getApplicationIDs()
+        // TapLinx exige seleccionar app maestra antes de getApplicationIDs()
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
         Object result = cardV1.getApplicationIDs();
         if (result instanceof ArrayList) {
@@ -95,36 +97,156 @@ public class DesfireOperations {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AUTENTICACIÓN
-    // KeyData constructor real del AAR: KeyData(java.security.Key)
-    // → wrappear byte[] con SecretKeySpec("AES")
+    // AUTENTICACIÓN CON DETECCIÓN AUTOMÁTICA DES / AES
+    //
+    // Las tarjetas formateadas con el script Python tienen clave DES 8 bytes.
+    // Las tarjetas nuevas o formateadas con esta app tienen clave AES-128.
+    // Probamos AES primero (más seguro), si falla probamos DES.
     // ─────────────────────────────────────────────────────────────────────────
 
-    public void authenticatePicc(byte[] masterKey) throws Exception {
-        byte[] key = (masterKey != null) ? masterKey : DEFAULT_KEY;
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(key));
-        Log.d(TAG, "Autenticado en PICC");
+    /**
+     * Autentica en el PICC (aplicación maestra).
+     * Detecta automáticamente si la tarjeta usa AES o DES.
+     * Devuelve true si usó DES (indica que la tarjeta necesita ser migrada a AES).
+     */
+    private boolean authenticatePiccAuto(byte[] masterKey) throws Exception {
+        // Intento 1: AES-128
+        try {
+            byte[] key = (masterKey != null && masterKey.length == 16) ? masterKey : DEFAULT_KEY_AES;
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(key, "AES"));
+            Log.d(TAG, "Auth PICC con AES OK");
+            return false; // no es DES
+        } catch (Exception e) {
+            Log.w(TAG, "Auth PICC AES falló, probando DES: " + e.getMessage());
+        }
+
+        // Intento 2: DES 8 bytes (tarjetas formateadas con script Python)
+        try {
+            byte[] key = (masterKey != null && masterKey.length == 8) ? masterKey : DEFAULT_KEY_DES;
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES, buildKeyData(key, "DES"));
+            Log.d(TAG, "Auth PICC con DES OK — tarjeta necesita migración a AES");
+            return true; // es DES
+        } catch (Exception e) {
+            Log.e(TAG, "Auth PICC DES también falló: " + e.getMessage());
+            throw new Exception("No se pudo autenticar en el PICC. Clave no reconocida.");
+        }
     }
 
-    public void authenticateApp(byte[] appKey, int keyNo) throws Exception {
-        byte[] k = (appKey != null) ? appKey : DEFAULT_KEY;
-        cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(k));
-    }
+    /**
+     * Autentica en la aplicación NDEF.
+     * Detecta automáticamente AES o DES.
+     */
+    private boolean authenticateAppAuto(byte[] appKey, int keyNo) throws Exception {
+        // Intento 1: AES-128
+        try {
+            byte[] key = (appKey != null && appKey.length == 16) ? appKey : DEFAULT_KEY_AES;
+            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(key, "AES"));
+            Log.d(TAG, "Auth App con AES OK");
+            return false;
+        } catch (Exception e) {
+            Log.w(TAG, "Auth App AES falló, probando DES: " + e.getMessage());
+        }
 
-    public void selectAndAuthenticate(byte[] aid, int keyNo, byte[] appKey) throws Exception {
-        cardV1.selectApplication(aid);
-        authenticateApp(appKey, keyNo);
-        Log.d(TAG, "Autenticado en app " + bytesToHex(aid));
+        // Intento 2: DES
+        try {
+            byte[] key = (appKey != null && appKey.length == 8) ? appKey : DEFAULT_KEY_DES;
+            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.DES, buildKeyData(key, "DES"));
+            Log.d(TAG, "Auth App con DES OK");
+            return true;
+        } catch (Exception e) {
+            throw new Exception("No se pudo autenticar en la aplicación. Clave no reconocida.");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CREAR APLICACIÓN NDEF
+    // ESCRIBIR URL NDEF
+    // Flujo completo: detecta tarjeta DES → la reformatea a AES → escribe URL
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public void writeNdefUrl(String url) throws Exception {
+        byte[] ndefMessage = buildNdefUriMessage(url);
+        if (ndefMessage.length > NDEF_FILE_SIZE) {
+            throw new Exception("URL demasiado larga (" + ndefMessage.length + " bytes).");
+        }
+
+        // Paso 1: seleccionar app NDEF y autenticar (detecta DES o AES)
+        cardV1.selectApplication(NDEF_AID);
+        boolean wasDes = authenticateAppAuto(null, 0);
+
+        if (wasDes) {
+            // La tarjeta está en DES — necesita reformateo completo a AES
+            Log.i(TAG, "Tarjeta DES detectada — reformateando a AES...");
+            reformatCardToAes(url);
+            return;
+        }
+
+        // Tarjeta ya en AES — escribir directamente
+        cardV1.writeData(NDEF_DATA_FILE_ID, 0, ndefMessage);
+        Log.d(TAG, "URL escrita: " + url);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // REFORMATEO COMPLETO: DES → AES
+    // Borra la app NDEF, la recrea con AES y escribe la URL
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void reformatCardToAes(String url) throws Exception {
+        Log.i(TAG, "Iniciando reformateo DES→AES");
+
+        // 1. Seleccionar PICC y autenticar con DES
+        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES,
+            buildKeyData(DEFAULT_KEY_DES, "DES"));
+
+        // 2. Borrar la app NDEF si existe
+        try {
+            cardV1.deleteApplication(NDEF_AID);
+            Log.d(TAG, "App NDEF borrada");
+        } catch (Exception e) {
+            Log.w(TAG, "deleteApplication: " + e.getMessage());
+        }
+
+        // 3. Re-autenticar tras borrar (requerido por DESFire)
+        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES,
+            buildKeyData(DEFAULT_KEY_DES, "DES"));
+
+        // 4. Crear app NDEF con AES-128
+        EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
+            .setKeyTypeOfApplicationKeys(KeyType.AES128)
+            .setMaxNumberOfApplicationKeys(2)
+            .setAppMasterKeyChangeable(true)
+            .setAppKeySettingsChangeable(true)
+            .setAuthenticationRequiredForFileManagement(false)
+            .build();
+
+        cardV3.createApplication(NDEF_AID, keySettings);
+        Log.d(TAG, "App NDEF creada con AES");
+
+        // 5. Seleccionar nueva app y autenticar con AES
+        cardV1.selectApplication(NDEF_AID);
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
+            buildKeyData(DEFAULT_KEY_AES, "AES"));
+
+        // 6. Crear ficheros CC y NDEF
+        createCapabilityContainerFile();
+        createNdefDataFile();
+
+        // 7. Escribir URL
+        byte[] ndefMessage = buildNdefUriMessage(url);
+        cardV1.writeData(NDEF_DATA_FILE_ID, 0, ndefMessage);
+        Log.i(TAG, "Reformateo completado y URL escrita: " + url);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CREAR APLICACIÓN NDEF (cuando la tarjeta está completamente vacía)
     // ─────────────────────────────────────────────────────────────────────────
 
     public void createNdefApp(byte[] appMasterKey) throws Exception {
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        authenticatePicc(null);
+        boolean wasDes = authenticatePiccAuto(null);
 
+        // Si estaba en DES, re-autenticar con DES explícitamente (ya lo hizo authenticatePiccAuto)
         ArrayList<byte[]> existingApps = readApplicationIds();
         for (byte[] aid : existingApps) {
             if (Arrays.equals(aid, NDEF_AID)) {
@@ -133,8 +255,14 @@ public class DesfireOperations {
             }
         }
 
-        // Builder es fluent (los setters devuelven EV3ApplicationKeySettings$Builder)
-        // createEV3ApplicationKeySettings() es package-private → usar new Builder()
+        if (wasDes) {
+            // Crear app con AES desde PICC autenticado con DES
+            Log.i(TAG, "PICC en DES — creando app NDEF con AES");
+            cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES,
+                buildKeyData(DEFAULT_KEY_DES, "DES"));
+        }
+
         EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
             .setKeyTypeOfApplicationKeys(KeyType.AES128)
             .setMaxNumberOfApplicationKeys(2)
@@ -147,10 +275,11 @@ public class DesfireOperations {
         Log.d(TAG, "Aplicación NDEF creada");
 
         cardV1.selectApplication(NDEF_AID);
-        authenticateApp(null, 0);
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
+            buildKeyData(DEFAULT_KEY_AES, "AES"));
 
-        if (appMasterKey != null && !Arrays.equals(appMasterKey, DEFAULT_KEY)) {
-            cardV1.changeKey(0, KeyType.AES128, appMasterKey, DEFAULT_KEY, (byte) 0x01);
+        if (appMasterKey != null && !Arrays.equals(appMasterKey, DEFAULT_KEY_AES)) {
+            cardV1.changeKey(0, KeyType.AES128, appMasterKey, DEFAULT_KEY_AES, (byte) 0x01);
         }
 
         createCapabilityContainerFile();
@@ -159,31 +288,22 @@ public class DesfireOperations {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // ESCRIBIR URL NDEF
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void writeNdefUrl(String url) throws Exception {
-        byte[] ndefMessage = buildNdefUriMessage(url);
-        if (ndefMessage.length > NDEF_FILE_SIZE) {
-            throw new Exception("URL demasiado larga (" + ndefMessage.length + " bytes).");
-        }
-        cardV1.selectApplication(NDEF_AID);
-        authenticateApp(null, 0);
-        cardV1.writeData(NDEF_DATA_FILE_ID, 0, ndefMessage);
-        Log.d(TAG, "URL escrita: " + url);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
     // CONFIGURAR SDM
     // ─────────────────────────────────────────────────────────────────────────
 
     public void configureSdm(SdmConfig config) throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        authenticateApp(null, 0);
+        boolean wasDes = authenticateAppAuto(null, 0);
+
+        if (wasDes) {
+            throw new Exception(
+                "La tarjeta está en formato DES. Escribe primero una URL para migrarla a AES, " +
+                "luego aplica el SDM.");
+        }
 
         DESFireEV3File.EV3FileSettings settings = cardV3.getDESFireEV3FileSettings(NDEF_DATA_FILE_ID);
         if (!(settings instanceof DESFireEV3File.StdEV3DataFileSettings)) {
-            throw new Exception("El fichero no es StdEV3DataFileSettings");
+            throw new Exception("El fichero NDEF no es StdEV3DataFileSettings");
         }
 
         DESFireEV3File.StdEV3DataFileSettings ds = (DESFireEV3File.StdEV3DataFileSettings) settings;
@@ -233,7 +353,7 @@ public class DesfireOperations {
 
     public DESFireEV3File.StdEV3DataFileSettings readSdmSettings() throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        authenticateApp(null, 0);
+        authenticateAppAuto(null, 0);
         DESFireEV3File.EV3FileSettings settings = cardV3.getDESFireEV3FileSettings(NDEF_DATA_FILE_ID);
         if (settings instanceof DESFireEV3File.StdEV3DataFileSettings) {
             return (DESFireEV3File.StdEV3DataFileSettings) settings;
@@ -246,6 +366,8 @@ public class DesfireOperations {
     // ─────────────────────────────────────────────────────────────────────────
 
     public void calculateSdmOffsets(String url, SdmConfig config) {
+        // Layout NDEF: [2 bytes NLEN][D1 01 payloadLen 55 uriId][url sin prefijo]
+        // Los 7 bytes de cabecera son el offset base
         int urlBase = 7;
         int protocolLen = url.startsWith("https://") ? 8 : (url.startsWith("http://") ? 7 : 0);
 
@@ -270,12 +392,9 @@ public class DesfireOperations {
             new DESFireEV3File.StdEV3DataFileSettings(
                 IDESFireEV1.CommunicationType.Plain,
                 (byte)0xEE, (byte)0xEE, (byte)0x00, (byte)0xEE,
-                15,
-                (byte)0x00,
-                null
+                15, (byte)0x00, null
             );
         cardV3.createFile(NDEF_CC_FILE_ID, ccSettings);
-        // Escribir CC con ISO File ID 0xE104 correcto (igual que script Python que sí funciona)
         cardV1.writeData(NDEF_CC_FILE_ID, 0, CC_DATA);
         Log.d(TAG, "Fichero CC creado con ISO ID E104");
     }
@@ -285,9 +404,7 @@ public class DesfireOperations {
             new DESFireEV3File.StdEV3DataFileSettings(
                 IDESFireEV1.CommunicationType.Plain,
                 (byte)0xEE, (byte)0xEE, (byte)0x00, (byte)0xEE,
-                NDEF_FILE_SIZE,
-                (byte)0x00,
-                null
+                NDEF_FILE_SIZE, (byte)0x00, null
             );
         cardV3.createFile(NDEF_DATA_FILE_ID, ndefSettings);
         Log.d(TAG, "Fichero NDEF creado");
@@ -343,15 +460,14 @@ public class DesfireOperations {
     }
 
     /**
-     * Construye IKeyData a partir de un byte[] de clave AES-128.
+     * Construye IKeyData a partir de un byte[] de clave.
+     * AAR confirma: KeyData() constructor vacío + setKey(java.security.Key)
      *
-     * Inspección del AAR confirma:
-     *   KeyData tiene UN solo constructor público: KeyData(java.security.Key)
-     *   → hay que envolver el byte[] en un SecretKeySpec("AES") primero.
+     * @param keyBytes bytes de la clave
+     * @param algorithm "AES" para AES-128, "DES" para DES de 8 bytes
      */
-    private IKeyData buildKeyData(byte[] keyBytes) throws Exception {
-        // AAR confirma: KeyData() constructor vacío + setKey(java.security.Key)
-        SecretKey secretKey = new SecretKeySpec(keyBytes, "AES");
+    private IKeyData buildKeyData(byte[] keyBytes, String algorithm) throws Exception {
+        SecretKey secretKey = new SecretKeySpec(keyBytes, algorithm);
         KeyData keyData = new KeyData();
         keyData.setKey(secretKey);
         return keyData;
