@@ -11,8 +11,6 @@ import com.nxp.nfclib.defaultimpl.KeyData;
 import com.nxp.nfclib.interfaces.IKeyData;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -20,72 +18,56 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * Operaciones DESFire EV3 — réplica exacta del script Python nfc_writer.py
  *
- * SOLUCIÓN DEFINITIVA (inspeccionando el AAR real con javap):
+ * CORRECCIONES clave respecto a versión anterior:
  *
- * Los ISO File IDs NO se pasan al Builder, sino como PARÁMETROS a los métodos:
+ *  1. isoFID de la APLICACIÓN no puede ser null.
+ *     El SDK lanza: UsageException("iso file ID [isoFID] should not be null")
+ *     Valor correcto según spec NDEF/DESFire: {0x10, 0xE1}
  *
- *   1. createApplication CON ISO DF Name:
- *      cardV3.createApplication(byte[] aid, EV3ApplicationKeySettings, byte[] isoFID, byte[] dfName)
- *      → isoFID = null (no hay FID para la app, solo DF Name)
- *      → dfName = {D2 76 00 00 85 01 01}
+ *  2. Flujo completamente automático en writeNdefUrl():
+ *     - Detecta si la tarjeta ya tiene app NDEF con ISO IDs correctos.
+ *     - Si CC apunta a E104 → app OK → solo escribe URL.
+ *     - Si no existe o CC incorrecto → crea/recrea app con ISO IDs → escribe URL.
+ *     - Sin checkbox, sin opción manual para el usuario.
  *
- *   2. createFile CON ISO File ID:
- *      cardV3.createFile(int fileNo, byte[] isoFileId, DESFireEV3File.EV3FileSettings)
- *      → isoFileId = {E1 03} para CC,  {E1 04} para NDEF
- *
- *   3. StdEV3DataFileSettings constructor CON ISO ID:
- *      new StdEV3DataFileSettings(CommunicationType, rw, r, w, car, size, ver, byte[] isoFileId)
- *
- * Esto es exactamente lo que hace el script Python con sus APDUs raw, pero
- * usando la API pública del SDK — sin APDUs manuales, sin IsoDep.
+ * ISO IDs estándar NDEF para DESFire:
+ *   APP_ISO_FID : {0x10, 0xE1}  — obligatorio (no null)
+ *   ISO_DF_NAME : D2 76 00 00 85 01 01  — SELECT por DF Name en móviles
+ *   CC  (E103)  : {0xE1, 0x03}
+ *   NDEF (E104) : {0xE1, 0x04}
  */
 public class DesfireOperations {
 
     private static final String TAG = "DesfireOps";
 
-    // ── AIDs y File IDs ───────────────────────────────────────────────────────
-    public static final byte[] NDEF_AID          = new byte[]{(byte)0xD2, 0x76, 0x00};
-    public static final int    NDEF_CC_FILE_ID   = 0x01;
-    public static final int    NDEF_DATA_FILE_ID = 0x02;
-    public static final int    NDEF_FILE_SIZE    = 255;
+    public static final byte[] MASTER_AID      = {0x00, 0x00, 0x00};
+    public static final byte[] NDEF_AID        = {(byte)0xD2, 0x76, 0x00};
 
-    /**
-     * ISO DF Name estándar NDEF — D2 76 00 00 85 01 01
-     * Permite que los móviles seleccionen la app con:
-     *   ISO SELECT: 00 A4 04 00 07 D2 76 00 00 85 01 01
-     */
-    private static final byte[] ISO_DF_NAME = new byte[]{
+    public static final int    CC_FILE_ID      = 0x01;
+    public static final int    NDEF_FILE_ID    = 0x02;
+    public static final int    NDEF_FILE_SIZE  = 255;
+
+    /** ISO FID de la aplicación — 2 bytes, NO puede ser null */
+    private static final byte[] APP_ISO_FID    = {0x10, (byte)0xE1};
+
+    /** ISO DF Name — SELECT 00 A4 04 00 07 D2 76 00 00 85 01 01 */
+    private static final byte[] ISO_DF_NAME    = {
         (byte)0xD2, 0x76, 0x00, 0x00, (byte)0x85, 0x01, 0x01
     };
 
-    /**
-     * ISO File ID del fichero CC → E1 03
-     * Permite selección ISO: 00 A4 00 0C 02 E1 03
-     */
-    private static final byte[] ISO_FILE_ID_CC   = new byte[]{(byte)0xE1, 0x03};
+    private static final byte[] ISO_FID_CC     = {(byte)0xE1, 0x03};
+    private static final byte[] ISO_FID_NDEF   = {(byte)0xE1, 0x04};
 
-    /**
-     * ISO File ID del fichero NDEF → E1 04  ← EL MÁS CRÍTICO
-     * Permite selección ISO: 00 A4 00 0C 02 E1 04
-     * Sin este ID los móviles no pueden leer el NDEF.
-     */
-    private static final byte[] ISO_FILE_ID_NDEF = new byte[]{(byte)0xE1, 0x04};
+    public static final byte[] KEY_AES_DEFAULT = new byte[16]; // 16 × 0x00
+    public static final byte[] KEY_DES_DEFAULT = new byte[8];  //  8 × 0x00
 
-    // Claves de fábrica
-    public static final byte[] DEFAULT_KEY_AES = new byte[16]; // 16 x 0x00
-    public static final byte[] DEFAULT_KEY_DES = new byte[8];  // 8  x 0x00
-
-    // CC correcto — apunta a E1 04
-    private static final byte[] CC_DATA = new byte[]{
-        0x00, 0x0F,              // Tamaño CC: 15 bytes
-        0x20,                    // Versión NDEF 2.0
-        0x00, 0x7F,              // Max lectura
-        0x00, 0x73,              // Max escritura
-        0x04, 0x06,              // NDEF File Control TLV
-        (byte)0xE1, 0x04,        // ← ISO File ID E104
-        0x00, (byte)0xFF,        // Max NDEF: 255 bytes
-        0x00,                    // Lectura libre
-        0x00                     // Escritura libre
+    /** CC correcto — 15 bytes, apunta a E104 */
+    private static final byte[] CC_DATA = {
+        0x00, 0x0F, 0x20, 0x00, 0x7F, 0x00, 0x73,
+        0x04, 0x06,
+        (byte)0xE1, 0x04,   // ← ISO FID fichero NDEF
+        0x00, (byte)0xFF,   // max NDEF
+        0x00, 0x00          // acceso libre
     };
 
     private final IDESFireEV1 cardV1;
@@ -96,220 +78,84 @@ public class DesfireOperations {
         this.cardV1 = card;
     }
 
-    /** Constructor sin tarjeta (solo para calcular offsets en preview) */
+    /** Constructor sin tarjeta (solo para preview de offsets en la UI) */
     public DesfireOperations() {
         this.cardV3 = null;
         this.cardV1 = null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // LECTURA BÁSICA
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public IDESFireEV1.CardDetails readCardDetails() throws Exception {
-        return cardV1.getCardDetails();
-    }
-
-    @SuppressWarnings("unchecked")
-    public ArrayList<byte[]> readApplicationIds() throws Exception {
-        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        Object result = cardV1.getApplicationIDs();
-        if (result instanceof ArrayList) {
-            return (ArrayList<byte[]>) result;
-        }
-        if (result instanceof int[]) {
-            int[] ids = (int[]) result;
-            ArrayList<byte[]> list = new ArrayList<>();
-            for (int id : ids) {
-                list.add(new byte[]{
-                    (byte)(id & 0xFF),
-                    (byte)((id >> 8) & 0xFF),
-                    (byte)((id >> 16) & 0xFF)
-                });
-            }
-            return list;
-        }
-        return new ArrayList<>();
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // AUTENTICACIÓN CON DETECCIÓN AUTOMÁTICA DES / AES
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private boolean authenticatePiccAuto(byte[] masterKey) throws Exception {
-        try {
-            byte[] key = (masterKey != null && masterKey.length == 16) ? masterKey : DEFAULT_KEY_AES;
-            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(key, "AES"));
-            Log.d(TAG, "Auth PICC AES OK");
-            return false;
-        } catch (Exception e) {
-            Log.w(TAG, "Auth PICC AES falló: " + e.getMessage());
-        }
-        try {
-            byte[] key = (masterKey != null && masterKey.length == 8) ? masterKey : DEFAULT_KEY_DES;
-            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES, buildKeyData(key, "DES"));
-            Log.d(TAG, "Auth PICC DES OK");
-            return true;
-        } catch (Exception e) {
-            throw new Exception("No se pudo autenticar en el PICC.");
-        }
-    }
-
-    private boolean authenticateAppAuto(byte[] appKey, int keyNo) throws Exception {
-        try {
-            byte[] key = (appKey != null && appKey.length == 16) ? appKey : DEFAULT_KEY_AES;
-            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.AES128, buildKeyData(key, "AES"));
-            Log.d(TAG, "Auth App AES OK");
-            return false;
-        } catch (Exception e) {
-            Log.w(TAG, "Auth App AES falló: " + e.getMessage());
-        }
-        try {
-            byte[] key = (appKey != null && appKey.length == 8) ? appKey : DEFAULT_KEY_DES;
-            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.THREEDES, buildKeyData(key, "DES"));
-            Log.d(TAG, "Auth App DES OK");
-            return true;
-        } catch (Exception e) {
-            throw new Exception("No se pudo autenticar en la app.");
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // CREAR APLICACIÓN NDEF CON ISO DF NAME + ISO FILE IDs
+    // PUNTO DE ENTRADA — WriteUrlActivity pulsa ESCRIBIR
     //
-    // Firma real del SDK (verificada con javap en el AAR):
-    //   IDESFireEV3.createApplication(byte[] aid, EV3ApplicationKeySettings, byte[] isoFID, byte[] dfName)
-    //   IDESFireEV3.createFile(int fileNo, byte[] isoFileId, EV3FileSettings)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void createNdefApp(byte[] appMasterKey) throws Exception {
-        Log.i(TAG, "=== createNdefApp con ISO DF Name + ISO File IDs ===");
-
-        // 1. Seleccionar Master App y autenticar
-        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        boolean wasDes = authenticatePiccAuto(null);
-
-        // 2. Borrar app NDEF si ya existe
-        ArrayList<byte[]> apps = readApplicationIds();
-        boolean appExists = false;
-        for (byte[] aid : apps) {
-            if (Arrays.equals(aid, NDEF_AID)) { appExists = true; break; }
-        }
-        if (appExists) {
-            Log.w(TAG, "App NDEF existe — borrando para recrear con ISO IDs");
-            cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-            if (wasDes) {
-                cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
-                    buildKeyData(DEFAULT_KEY_DES, "DES"));
-            } else {
-                cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
-                    buildKeyData(DEFAULT_KEY_AES, "AES"));
-            }
-            try { cardV1.deleteApplication(NDEF_AID); } catch (Exception e) {
-                Log.w(TAG, "deleteApplication: " + e.getMessage());
-            }
-            // Re-autenticar tras borrar (DESFire lo exige)
-            cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-            if (wasDes) {
-                cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
-                    buildKeyData(DEFAULT_KEY_DES, "DES"));
-            } else {
-                cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
-                    buildKeyData(DEFAULT_KEY_AES, "AES"));
-            }
-        }
-
-        // 3. Crear la aplicación con ISO DF Name
-        //    Firma: createApplication(byte[] aid, EV3ApplicationKeySettings, byte[] isoFID, byte[] dfName)
-        //    isoFID = null → la app no tiene ISO File Identifier propio, solo DF Name
-        //    dfName = D2 76 00 00 85 01 01 → nombre estándar NDEF
-        EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
-            .setKeyTypeOfApplicationKeys(KeyType.AES128)
-            .setMaxNumberOfApplicationKeys(2)
-            .setAppMasterKeyChangeable(true)
-            .setAppKeySettingsChangeable(true)
-            .setAuthenticationRequiredForFileManagement(false)
-            .setIsoFileIdentifierPresent(true)  // ← habilita el campo ISO en el APDU
-            .build();
-
-        cardV3.createApplication(NDEF_AID, keySettings, null, ISO_DF_NAME);
-        Log.d(TAG, "App NDEF creada con ISO DF Name: " + bytesToHex(ISO_DF_NAME));
-
-        // 4. Seleccionar la nueva app y autenticar con AES
-        cardV1.selectApplication(NDEF_AID);
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
-            buildKeyData(DEFAULT_KEY_AES, "AES"));
-
-        if (appMasterKey != null && !Arrays.equals(appMasterKey, DEFAULT_KEY_AES)) {
-            cardV1.changeKey(0, KeyType.AES128, appMasterKey, DEFAULT_KEY_AES, (byte)0x01);
-        }
-
-        // 5. Crear File CC con ISO File ID E103
-        //    Firma: createFile(int fileNo, byte[] isoFileId, EV3FileSettings)
-        createCapabilityContainerFile();
-
-        // 6. Crear File NDEF con ISO File ID E104
-        createNdefDataFile();
-
-        // 7. Escribir CC y NDEF vacío
-        cardV1.writeData(NDEF_CC_FILE_ID, 0, CC_DATA);
-        cardV1.writeData(NDEF_DATA_FILE_ID, 0, new byte[]{0x00, 0x00});
-
-        Log.i(TAG, "=== App NDEF lista — tarjeta legible por móviles ===");
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // ESCRIBIR URL NDEF
+    // Flujo automático:
+    //   1. Intentar leer CC de la app NDEF.
+    //   2. Si CC correcto (E104) → solo escribir URL.
+    //   3. Si no → crear/recrear app → escribir URL.
     // ─────────────────────────────────────────────────────────────────────────
 
     public void writeNdefUrl(String url) throws Exception {
-        byte[] ndefMessage = buildNdefUriMessage(url);
-        if (ndefMessage.length > NDEF_FILE_SIZE) {
-            throw new Exception("URL demasiado larga (" + ndefMessage.length + " bytes).");
-        }
+        if (url == null || url.isEmpty())
+            throw new Exception("La URL no puede estar vacía.");
+
+        byte[] ndefMsg = buildNdefUriMessage(url);
+        if (ndefMsg.length > NDEF_FILE_SIZE)
+            throw new Exception("URL demasiado larga (" + ndefMsg.length + " bytes, máx " + NDEF_FILE_SIZE + ").");
 
         Log.i(TAG, "writeNdefUrl: " + url);
-        cardV1.selectApplication(NDEF_AID);
 
-        boolean wasDes = false;
-        boolean authOk = false;
+        // ── Comprobar si la app ya está bien formateada ───────────────────────
+        boolean needsSetup = true;
         try {
-            wasDes = authenticateAppAuto(null, 0);
-            authOk = true;
+            cardV1.selectApplication(NDEF_AID);
+            try { authApp(KEY_AES_DEFAULT, 0); } catch (Exception ignored) {}
+            byte[] cc = cardV1.readData(CC_FILE_ID, 0, 15);
+            if (ccIsCorrect(cc)) {
+                Log.i(TAG, "App NDEF con ISO IDs OK — solo escribo URL.");
+                needsSetup = false;
+            } else {
+                Log.w(TAG, "CC incorrecto (sin ISO IDs) — se recreará la app.");
+            }
         } catch (Exception e) {
-            Log.w(TAG, "Auth falló — intentando escritura directa: " + e.getMessage());
+            Log.i(TAG, "App NDEF no disponible: " + e.getMessage() + " — se creará.");
         }
 
-        if (authOk && wasDes) {
-            Log.i(TAG, "Tarjeta DES — reformateando a AES...");
-            reformatCardToAes(url);
-            return;
+        if (needsSetup) {
+            setupNdefApp(url);
+        } else {
+            // App correcta: solo escribir URL
+            cardV1.selectApplication(NDEF_AID);
+            authApp(KEY_AES_DEFAULT, 0);
+            cardV1.writeData(NDEF_FILE_ID, 0, ndefMsg);
+            Log.i(TAG, "URL actualizada OK.");
         }
-
-        cardV1.writeData(NDEF_DATA_FILE_ID, 0, ndefMessage);
-        Log.d(TAG, "URL escrita OK: " + url);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // REFORMATEO DES → AES (mantiene ISO File IDs)
+    // CREAR / RECREAR APP NDEF CON ISO IDs
     // ─────────────────────────────────────────────────────────────────────────
 
-    private void reformatCardToAes(String url) throws Exception {
-        Log.i(TAG, "=== reformatCardToAes ===");
+    private void setupNdefApp(String url) throws Exception {
+        Log.i(TAG, "=== setupNdefApp ===");
 
-        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
-            buildKeyData(DEFAULT_KEY_DES, "DES"));
-        try { cardV1.deleteApplication(NDEF_AID); } catch (Exception e) {
-            Log.w(TAG, "deleteApplication: " + e.getMessage());
+        // 1. PICC master auth
+        cardV1.selectApplication(MASTER_AID);
+        boolean wasDes = authPicc();
+
+        // 2. Borrar app NDEF si existe
+        if (ndefAppExists()) {
+            Log.w(TAG, "Borrando app NDEF existente...");
+            deleteNdefApp(wasDes);
+            // Tras borrar, re-seleccionar y re-autenticar PICC
+            cardV1.selectApplication(MASTER_AID);
+            if (wasDes)
+                cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES, keyData(KEY_DES_DEFAULT, "DES"));
+            else
+                cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,   keyData(KEY_AES_DEFAULT, "AES"));
         }
 
-        cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
-            buildKeyData(DEFAULT_KEY_DES, "DES"));
-
-        // Crear app con ISO DF Name
-        EV3ApplicationKeySettings keySettings = new EV3ApplicationKeySettings.Builder()
+        // 3. Crear app con APP_ISO_FID + ISO_DF_NAME
+        //    NOTA: isoFID={0x10,0xE1} — el SDK lanza UsageException si es null
+        EV3ApplicationKeySettings ks = new EV3ApplicationKeySettings.Builder()
             .setKeyTypeOfApplicationKeys(KeyType.AES128)
             .setMaxNumberOfApplicationKeys(2)
             .setAppMasterKeyChangeable(true)
@@ -318,19 +164,35 @@ public class DesfireOperations {
             .setIsoFileIdentifierPresent(true)
             .build();
 
-        cardV3.createApplication(NDEF_AID, keySettings, null, ISO_DF_NAME);
+        cardV3.createApplication(NDEF_AID, ks, APP_ISO_FID, ISO_DF_NAME);
+        Log.d(TAG, "App creada — APP_ISO_FID=" + bytesToHex(APP_ISO_FID)
+            + " DF_NAME=" + bytesToHex(ISO_DF_NAME));
 
+        // 4. Seleccionar y autenticar la nueva app
         cardV1.selectApplication(NDEF_AID);
         cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
-            buildKeyData(DEFAULT_KEY_AES, "AES"));
+            keyData(KEY_AES_DEFAULT, "AES"));
 
-        createCapabilityContainerFile();
-        createNdefDataFile();
+        // 5. Crear fichero CC con ISO FID E103
+        cardV3.createFile(CC_FILE_ID, ISO_FID_CC,
+            new DESFireEV3File.StdEV3DataFileSettings(
+                IDESFireEV1.CommunicationType.Plain,
+                (byte)0xEE, (byte)0xEE, (byte)0x00, (byte)0xEE,
+                15, (byte)0x00, ISO_FID_CC));
+        Log.d(TAG, "File CC creado (E103).");
 
-        cardV1.writeData(NDEF_CC_FILE_ID, 0, CC_DATA);
-        cardV1.writeData(NDEF_DATA_FILE_ID, 0, buildNdefUriMessage(url));
+        // 6. Crear fichero NDEF con ISO FID E104
+        cardV3.createFile(NDEF_FILE_ID, ISO_FID_NDEF,
+            new DESFireEV3File.StdEV3DataFileSettings(
+                IDESFireEV1.CommunicationType.Plain,
+                (byte)0xEE, (byte)0xEE, (byte)0x00, (byte)0xEE,
+                NDEF_FILE_SIZE, (byte)0x00, ISO_FID_NDEF));
+        Log.d(TAG, "File NDEF creado (E104).");
 
-        Log.i(TAG, "Reformateo DES→AES completado: " + url);
+        // 7. Escribir CC y URL
+        cardV1.writeData(CC_FILE_ID, 0, CC_DATA);
+        cardV1.writeData(NDEF_FILE_ID, 0, buildNdefUriMessage(url));
+        Log.i(TAG, "=== setupNdefApp OK. URL: " + url + " ===");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -339,97 +201,64 @@ public class DesfireOperations {
 
     public void configureSdm(SdmConfig config) throws Exception {
         Log.i(TAG, "=== configureSdm ===");
-
         cardV1.selectApplication(NDEF_AID);
+        if (authApp(KEY_AES_DEFAULT, 0))
+            throw new Exception("Tarjeta en DES. Escribe una URL primero para migrar a AES.");
 
-        boolean wasDes = false;
-        try {
-            wasDes = authenticateAppAuto(null, 0);
-        } catch (Exception e) {
-            throw new Exception("Auth SDM fallida: " + e.getMessage());
-        }
-
-        if (wasDes) {
-            String currentUrl = "";
-            try {
-                byte[] raw = cardV1.readData(NDEF_DATA_FILE_ID, 0, 0);
-                if (raw != null && raw.length > 2) {
-                    int ndefLen = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
-                    if (ndefLen > 0) currentUrl = parseNdefUriRecord(raw, 2, ndefLen);
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "No se pudo leer URL: " + e.getMessage());
-            }
-            if (currentUrl == null || currentUrl.isEmpty()) {
-                throw new Exception("Tarjeta en DES sin URL. Escribe una URL primero.");
-            }
-            reformatCardToAes(currentUrl);
-            cardV1.selectApplication(NDEF_AID);
-            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
-                buildKeyData(DEFAULT_KEY_AES, "AES"));
-        }
-
-        DESFireEV3File.EV3FileSettings settings = cardV3.getDESFireEV3FileSettings(NDEF_DATA_FILE_ID);
-        if (!(settings instanceof DESFireEV3File.StdEV3DataFileSettings)) {
+        DESFireEV3File.EV3FileSettings raw = cardV3.getDESFireEV3FileSettings(NDEF_FILE_ID);
+        if (!(raw instanceof DESFireEV3File.StdEV3DataFileSettings))
             throw new Exception("El fichero NDEF no es StdEV3DataFileSettings.");
-        }
 
-        DESFireEV3File.StdEV3DataFileSettings ds = (DESFireEV3File.StdEV3DataFileSettings) settings;
-
+        DESFireEV3File.StdEV3DataFileSettings ds = (DESFireEV3File.StdEV3DataFileSettings) raw;
         ds.setSDMEnabled(true);
         ds.setUIDMirroringEnabled(config.isUidMirroringEnabled());
-        if (config.isUidMirroringEnabled()) {
-            ds.setUidOffset(intTo3Bytes(config.getPiccDataOffset()));
-        }
+        if (config.isUidMirroringEnabled())
+            ds.setUidOffset(intTo3LE(config.getPiccDataOffset()));
         ds.setSDMReadCounterEnabled(config.isSdmReadCounterEnabled());
-        if (config.isSdmReadCounterEnabled()) {
-            ds.setSdmReadCounterOffset(intTo3Bytes(config.getSdmReadCounterOffset()));
-        }
+        if (config.isSdmReadCounterEnabled())
+            ds.setSdmReadCounterOffset(intTo3LE(config.getSdmReadCounterOffset()));
         ds.setSDMReadCounterLimitEnabled(config.isSdmReadCounterLimitEnabled());
-        if (config.isSdmReadCounterLimitEnabled()) {
-            ds.setSdmReadCounterLimit(intTo3Bytes(config.getSdmReadCounterLimit()));
-        }
+        if (config.isSdmReadCounterLimitEnabled())
+            ds.setSdmReadCounterLimit(intTo3LE(config.getSdmReadCounterLimit()));
         ds.setSDMEncryptFileDataEnabled(config.isSdmEncryptionEnabled());
         if (config.isSdmEncryptionEnabled()) {
-            ds.setSdmEncryptionOffset(intTo3Bytes(config.getSdmEncOffset()));
-            ds.setSdmEncryptionLength(intTo3Bytes(config.getSdmEncLength()));
+            ds.setSdmEncryptionOffset(intTo3LE(config.getSdmEncOffset()));
+            ds.setSdmEncryptionLength(intTo3LE(config.getSdmEncLength()));
         }
-        ds.setSdmMacOffset(intTo3Bytes(config.getSdmMacOffset()));
-        // MacInputOffset = inicio del NDEF (byte 2, tras los 2 bytes NLEN)
-        ds.setSdmMacInputOffset(intTo3Bytes(2));
+        ds.setSdmMacOffset(intTo3LE(config.getSdmMacOffset()));
+        ds.setSdmMacInputOffset(intTo3LE(2));
         ds.setSdmAccessRights(new byte[]{config.getSdmAccessRights(), config.getSdmAccessRights()});
-
-        cardV3.changeDESFireEV3FileSettings(NDEF_DATA_FILE_ID, ds);
-        Log.d(TAG, "SDM configurado correctamente");
+        cardV3.changeDESFireEV3FileSettings(NDEF_FILE_ID, ds);
+        Log.d(TAG, "SDM configurado.");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // LEER NDEF
+    // LEER
     // ─────────────────────────────────────────────────────────────────────────
 
-    public byte[] readNdefFile() throws Exception {
+    public IDESFireEV1.CardDetails readCardDetails() throws Exception {
+        return cardV1.getCardDetails();
+    }
+
+    public byte[] readNdefRaw() throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        return cardV1.readData(NDEF_DATA_FILE_ID, 0, 0);
+        return cardV1.readData(NDEF_FILE_ID, 0, 0);
     }
 
     public String readNdefAsString() throws Exception {
-        byte[] raw = readNdefFile();
-        if (raw == null || raw.length < 2) return "(vacío)";
-        int ndefLength = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
-        if (ndefLength == 0 || ndefLength > raw.length - 2) return "(sin NDEF)";
-        return parseNdefUriRecord(raw, 2, ndefLength);
+        byte[] raw = readNdefRaw();
+        if (raw == null || raw.length < 4) return "(vacío)";
+        int nlen = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
+        if (nlen == 0) return "(sin NDEF)";
+        return parseNdefUri(raw, 2, nlen);
     }
 
     public DESFireEV3File.StdEV3DataFileSettings readSdmSettings() throws Exception {
         cardV1.selectApplication(NDEF_AID);
-        try { authenticateAppAuto(null, 0); } catch (Exception e) {
-            Log.w(TAG, "Auth opcional readSdmSettings: " + e.getMessage());
-        }
-        DESFireEV3File.EV3FileSettings settings = cardV3.getDESFireEV3FileSettings(NDEF_DATA_FILE_ID);
-        if (settings instanceof DESFireEV3File.StdEV3DataFileSettings) {
-            return (DESFireEV3File.StdEV3DataFileSettings) settings;
-        }
-        return null;
+        try { authApp(KEY_AES_DEFAULT, 0); } catch (Exception ignored) {}
+        DESFireEV3File.EV3FileSettings s = cardV3.getDESFireEV3FileSettings(NDEF_FILE_ID);
+        return (s instanceof DESFireEV3File.StdEV3DataFileSettings)
+            ? (DESFireEV3File.StdEV3DataFileSettings) s : null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -443,125 +272,131 @@ public class DesfireOperations {
         else if (url.startsWith("http://www."))  prefixLen = 11;
         else if (url.startsWith("http://"))      prefixLen = 7;
 
-        // NLEN(2) + D1(1) + TypeLen(1) + PayloadLen(1) + 'U'(1) + UriId(1) = 7
-        final int BASE = 7;
+        final int BASE = 7; // NLEN(2)+flags(1)+typeLen(1)+payloadLen(1)+'U'(1)+uriId(1)
 
-        int piccPos = url.indexOf("00000000000000000000000000000000");
-        if (piccPos >= 0) config.setPiccDataOffset(BASE + (piccPos - prefixLen));
+        String u = url;
+        int piccPos = u.indexOf("00000000000000000000000000000000");
+        if (piccPos >= 0) {
+            config.setPiccDataOffset(BASE + (piccPos - prefixLen));
+            u = u.replace("00000000000000000000000000000000", "################################");
+        }
+        int macPos = u.indexOf("0000000000000000");
+        if (macPos >= 0) {
+            config.setSdmMacOffset(BASE + (macPos - prefixLen));
+            u = u.replace("0000000000000000", "################");
+        }
+        int ctrPos = u.indexOf("000000");
+        if (ctrPos >= 0)
+            config.setSdmReadCounterOffset(BASE + (ctrPos - prefixLen));
 
-        String u2 = url.replace("00000000000000000000000000000000", "################################");
-        int macPos = u2.indexOf("0000000000000000");
-        if (macPos >= 0) config.setSdmMacOffset(BASE + (macPos - prefixLen));
-
-        String u3 = u2.replace("0000000000000000", "################");
-        int ctrPos = u3.indexOf("000000");
-        if (ctrPos >= 0) config.setSdmReadCounterOffset(BASE + (ctrPos - prefixLen));
-
-        Log.d(TAG, "Offsets: PICC=" + config.getPiccDataOffset()
+        Log.d(TAG, "SDM offsets → PICC=" + config.getPiccDataOffset()
             + " MAC=" + config.getSdmMacOffset()
             + " CTR=" + config.getSdmReadCounterOffset());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // HELPERS PRIVADOS — Creación de ficheros
+    // HELPERS PRIVADOS
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Crea File CC (File 01) con ISO File ID E103.
-     *
-     * Firma SDK usada:
-     *   cardV3.createFile(int fileNo, byte[] isoFileId, DESFireEV3File.EV3FileSettings)
-     *
-     * Constructor StdEV3DataFileSettings con ISO ID:
-     *   new StdEV3DataFileSettings(CommType, rw, r, w, car, size, ver, byte[] isoFileId)
-     */
-    private void createCapabilityContainerFile() throws Exception {
-        DESFireEV3File.StdEV3DataFileSettings ccSettings =
-            new DESFireEV3File.StdEV3DataFileSettings(
-                IDESFireEV1.CommunicationType.Plain,
-                (byte)0xEE,   // Read&Write: libre
-                (byte)0xEE,   // Read: libre
-                (byte)0x00,   // Write: clave 0
-                (byte)0xEE,   // ChangeAccessRights: libre
-                15,           // Tamaño: 15 bytes
-                (byte)0x00,   // versión
-                ISO_FILE_ID_CC // ← ISO File ID E103
-            );
-        // Usar createFile CON ISO File ID como segundo parámetro
-        cardV3.createFile(NDEF_CC_FILE_ID, ISO_FILE_ID_CC, ccSettings);
-        Log.d(TAG, "File CC creado con ISO ID E103");
+    /** Auth PICC: prueba AES, luego DES. Devuelve true si era DES. */
+    private boolean authPicc() throws Exception {
+        try {
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
+                keyData(KEY_AES_DEFAULT, "AES"));
+            return false;
+        } catch (Exception ignored) {}
+        try {
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
+                keyData(KEY_DES_DEFAULT, "DES"));
+            return true;
+        } catch (Exception e) {
+            throw new Exception("No se pudo autenticar en PICC: " + e.getMessage());
+        }
     }
 
-    /**
-     * Crea File NDEF (File 02) con ISO File ID E104.
-     *
-     * Sin este ISO ID los móviles no pueden seleccionar el fichero NDEF
-     * y por tanto no pueden leer ni escribir NDEF por la vía estándar.
-     */
-    private void createNdefDataFile() throws Exception {
-        DESFireEV3File.StdEV3DataFileSettings ndefSettings =
-            new DESFireEV3File.StdEV3DataFileSettings(
-                IDESFireEV1.CommunicationType.Plain,
-                (byte)0xEE,      // Read&Write: libre
-                (byte)0xEE,      // Read: libre
-                (byte)0x00,      // Write: clave 0
-                (byte)0xEE,      // ChangeAccessRights: libre
-                NDEF_FILE_SIZE,  // 255 bytes
-                (byte)0x00,      // versión
-                ISO_FILE_ID_NDEF // ← ISO File ID E104
-            );
-        // Usar createFile CON ISO File ID como segundo parámetro
-        cardV3.createFile(NDEF_DATA_FILE_ID, ISO_FILE_ID_NDEF, ndefSettings);
-        Log.d(TAG, "File NDEF creado con ISO ID E104");
+    /** Auth app: prueba AES, luego DES. Devuelve true si era DES. */
+    private boolean authApp(byte[] key, int keyNo) throws Exception {
+        try {
+            byte[] k = (key != null && key.length == 16) ? key : KEY_AES_DEFAULT;
+            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.AES128, keyData(k, "AES"));
+            return false;
+        } catch (Exception ignored) {}
+        try {
+            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
+                keyData(KEY_DES_DEFAULT, "DES"));
+            return true;
+        } catch (Exception e) {
+            throw new Exception("No se pudo autenticar en app: " + e.getMessage());
+        }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // HELPERS PRIVADOS — NDEF
-    // ─────────────────────────────────────────────────────────────────────────
+    private boolean ndefAppExists() {
+        try {
+            int[] ids = cardV1.getApplicationIDs();
+            if (ids == null) return false;
+            int target = (NDEF_AID[0] & 0xFF)
+                | ((NDEF_AID[1] & 0xFF) << 8)
+                | ((NDEF_AID[2] & 0xFF) << 16);
+            for (int id : ids) if (id == target) return true;
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void deleteNdefApp(boolean wasDes) throws Exception {
+        cardV1.selectApplication(MASTER_AID);
+        if (wasDes)
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
+                keyData(KEY_DES_DEFAULT, "DES"));
+        else
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.AES128,
+                keyData(KEY_AES_DEFAULT, "AES"));
+        try { cardV1.deleteApplication(NDEF_AID); } catch (Exception e) {
+            Log.w(TAG, "deleteApplication: " + e.getMessage());
+        }
+    }
+
+    /** CC correcto si los bytes [8..9] son E1 04 (ISO FID del fichero NDEF). */
+    private boolean ccIsCorrect(byte[] cc) {
+        return cc != null && cc.length >= 11
+            && (cc[8] & 0xFF) == 0xE1 && (cc[9] & 0xFF) == 0x04;
+    }
 
     private byte[] buildNdefUriMessage(String url) {
-        byte uriId;
-        String payload;
+        byte uriId; String payload;
         if      (url.startsWith("https://www.")) { uriId = 0x02; payload = url.substring(12); }
         else if (url.startsWith("https://"))     { uriId = 0x04; payload = url.substring(8);  }
         else if (url.startsWith("http://www."))  { uriId = 0x01; payload = url.substring(11); }
         else if (url.startsWith("http://"))      { uriId = 0x03; payload = url.substring(7);  }
         else                                     { uriId = 0x00; payload = url;               }
 
-        byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
-        int payloadLen = 1 + payloadBytes.length;
-
-        byte[] record = new byte[4 + payloadLen];
-        record[0] = (byte)0xD1;
-        record[1] = 0x01;
-        record[2] = (byte)(payloadLen & 0xFF);
-        record[3] = 0x55;
-        record[4] = uriId;
-        System.arraycopy(payloadBytes, 0, record, 5, payloadBytes.length);
-
-        byte[] msg = new byte[2 + record.length];
-        msg[0] = (byte)((record.length >> 8) & 0xFF);
-        msg[1] = (byte)(record.length & 0xFF);
-        System.arraycopy(record, 0, msg, 2, record.length);
+        byte[] pb = payload.getBytes(StandardCharsets.UTF_8);
+        int plen = 1 + pb.length;
+        byte[] rec = new byte[4 + plen];
+        rec[0] = (byte)0xD1; rec[1] = 0x01;
+        rec[2] = (byte)(plen & 0xFF); rec[3] = 0x55;
+        rec[4] = uriId;
+        System.arraycopy(pb, 0, rec, 5, pb.length);
+        byte[] msg = new byte[2 + rec.length];
+        msg[0] = (byte)((rec.length >> 8) & 0xFF);
+        msg[1] = (byte)(rec.length & 0xFF);
+        System.arraycopy(rec, 0, msg, 2, rec.length);
         return msg;
     }
 
-    private String parseNdefUriRecord(byte[] buf, int offset, int length) {
+    private String parseNdefUri(byte[] buf, int off, int len) {
         try {
-            if (length < 5) return new String(buf, offset, length, StandardCharsets.UTF_8);
-            int typeLen    = buf[offset + 1] & 0xFF;
-            int payloadLen = buf[offset + 2] & 0xFF;
-            int payloadStart = offset + 3 + typeLen;
-            if (payloadStart >= buf.length || payloadLen < 1) return "(error NDEF)";
-            byte uriId = buf[payloadStart];
-            String rest = new String(buf, payloadStart + 1, payloadLen - 1, StandardCharsets.UTF_8);
-            return uriIdPrefix(uriId) + rest;
-        } catch (Exception e) {
-            return "(error: " + e.getMessage() + ")";
-        }
+            int typeLen = buf[off + 1] & 0xFF;
+            int ps = off + 3 + typeLen;
+            int plen = buf[off + 2] & 0xFF;
+            if (ps >= buf.length || plen < 1) return "(NDEF inválido)";
+            byte uid = buf[ps];
+            String rest = new String(buf, ps + 1,
+                Math.min(plen - 1, buf.length - ps - 1), StandardCharsets.UTF_8);
+            return uriPrefix(uid) + rest;
+        } catch (Exception e) { return "(error: " + e.getMessage() + ")"; }
     }
 
-    private String uriIdPrefix(byte id) {
+    private String uriPrefix(byte id) {
         switch (id & 0xFF) {
             case 0x01: return "http://www.";
             case 0x02: return "https://www.";
@@ -573,34 +408,30 @@ public class DesfireOperations {
         }
     }
 
-    private byte[] intTo3Bytes(int v) {
-        return new byte[]{
-            (byte)(v & 0xFF),
-            (byte)((v >> 8) & 0xFF),
-            (byte)((v >> 16) & 0xFF)
-        };
+    private byte[] intTo3LE(int v) {
+        return new byte[]{(byte)(v & 0xFF), (byte)((v >> 8) & 0xFF), (byte)((v >> 16) & 0xFF)};
     }
 
-    private IKeyData buildKeyData(byte[] keyBytes, String algorithm) throws Exception {
-        SecretKey secretKey;
-        if ("DES".equals(algorithm)) {
-            byte[] desEde = new byte[24];
-            System.arraycopy(keyBytes, 0, desEde, 0,  8);
-            System.arraycopy(keyBytes, 0, desEde, 8,  8);
-            System.arraycopy(keyBytes, 0, desEde, 16, 8);
-            secretKey = new SecretKeySpec(desEde, "DESede");
+    private IKeyData keyData(byte[] raw, String algo) throws Exception {
+        SecretKey sk;
+        if ("DES".equals(algo)) {
+            byte[] ede = new byte[24];
+            System.arraycopy(raw, 0, ede, 0, 8);
+            System.arraycopy(raw, 0, ede, 8, 8);
+            System.arraycopy(raw, 0, ede, 16, 8);
+            sk = new SecretKeySpec(ede, "DESede");
         } else {
-            secretKey = new SecretKeySpec(keyBytes, algorithm);
+            sk = new SecretKeySpec(raw, algo);
         }
-        KeyData keyData = new KeyData();
-        keyData.setKey(secretKey);
-        return keyData;
+        KeyData kd = new KeyData();
+        kd.setKey(sk);
+        return kd;
     }
 
-    public static String bytesToHex(byte[] bytes) {
-        if (bytes == null) return "null";
+    public static String bytesToHex(byte[] b) {
+        if (b == null) return "null";
         StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) sb.append(String.format("%02X", b));
+        for (byte x : b) sb.append(String.format("%02X", x));
         return sb.toString();
     }
 }
