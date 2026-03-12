@@ -123,7 +123,7 @@ public class DesfireOperations {
         // Intento 2: DES 8 bytes (tarjetas formateadas con script Python)
         try {
             byte[] key = (masterKey != null && masterKey.length == 8) ? masterKey : DEFAULT_KEY_DES;
-            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES, buildKeyData(key, "DES"));
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES, buildKeyData(key, "DES"));
             Log.d(TAG, "Auth PICC con DES OK — tarjeta necesita migración a AES");
             return true; // es DES
         } catch (Exception e) {
@@ -150,7 +150,7 @@ public class DesfireOperations {
         // Intento 2: DES
         try {
             byte[] key = (appKey != null && appKey.length == 8) ? appKey : DEFAULT_KEY_DES;
-            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.DES, buildKeyData(key, "DES"));
+            cardV1.authenticate(keyNo, IDESFireEV1.AuthType.Native, KeyType.THREEDES, buildKeyData(key, "DES"));
             Log.d(TAG, "Auth App con DES OK");
             return true;
         } catch (Exception e) {
@@ -195,7 +195,7 @@ public class DesfireOperations {
 
         // 1. Seleccionar PICC y autenticar con DES
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES,
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
             buildKeyData(DEFAULT_KEY_DES, "DES"));
 
         // 2. Borrar la app NDEF si existe
@@ -208,7 +208,7 @@ public class DesfireOperations {
 
         // 3. Re-autenticar tras borrar (requerido por DESFire)
         cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES,
+        cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
             buildKeyData(DEFAULT_KEY_DES, "DES"));
 
         // 4. Crear app NDEF con AES-128
@@ -259,7 +259,7 @@ public class DesfireOperations {
             // Crear app con AES desde PICC autenticado con DES
             Log.i(TAG, "PICC en DES — creando app NDEF con AES");
             cardV1.selectApplication(new byte[]{0x00, 0x00, 0x00});
-            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.DES,
+            cardV1.authenticate(0, IDESFireEV1.AuthType.Native, KeyType.THREEDES,
                 buildKeyData(DEFAULT_KEY_DES, "DES"));
         }
 
