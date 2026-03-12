@@ -100,19 +100,28 @@ public class ReadCardActivity extends AppCompatActivity {
                 sb.append("Nombre:     ").append(d.cardName).append("\n");
                 sb.append("Versión HW: ").append(d.majorVersion).append(".").append(d.minorVersion).append("\n");
                 sb.append("Memoria:    ").append(d.freeMemory).append(" / ").append(d.totalMemory).append(" bytes\n");
-                // vendorID puede ser int o byte según versión SDK — usar cast seguro
                 sb.append("Vendor ID:  ").append(String.format("%02X", d.vendorID & 0xFF)).append("\n");
             }
-            ArrayList<byte[]> apps = ops.readApplicationIds();
-            sb.append("\n── APLICACIONES (").append(apps.size()).append(") ───────\n");
-            for (byte[] aid : apps) sb.append("  AID: ").append(DesfireOperations.bytesToHex(aid)).append("\n");
+            // Leer AIDs directamente con la API del SDK
+            int[] ids = ops.getApplicationIDs();
+            sb.append("\n── APLICACIONES (").append(ids != null ? ids.length : 0).append(") ───────\n");
+            if (ids != null) {
+                for (int id : ids) {
+                    byte[] aid = new byte[]{
+                        (byte)(id & 0xFF),
+                        (byte)((id >> 8) & 0xFF),
+                        (byte)((id >> 16) & 0xFF)
+                    };
+                    sb.append("  AID: ").append(DesfireOperations.bytesToHex(aid)).append("\n");
+                }
+            }
             return sb.toString();
         }
 
         private String readNdef(DesfireOperations ops) throws Exception {
             StringBuilder sb = new StringBuilder("── CONTENIDO NDEF ───────────\n");
             sb.append(ops.readNdefAsString()).append("\n\n");
-            byte[] raw = ops.readNdefFile();
+            byte[] raw = ops.readNdefRaw();           // ← nombre actual del método
             sb.append("── RAW (primeros 64 bytes) ──\n");
             if (raw != null) {
                 byte[] preview = new byte[Math.min(64, raw.length)];
