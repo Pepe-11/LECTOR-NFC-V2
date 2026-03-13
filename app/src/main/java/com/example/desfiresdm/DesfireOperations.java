@@ -2,13 +2,13 @@ package com.example.desfiresdm;
 
 import android.util.Log;
 
-import com.nxp.nfclib.desfire.DESFireEV3;
-import com.nxp.nfclib.desfire.DESFireEV3File;
 import com.nxp.nfclib.desfire.IDESFireEV1;
+import com.nxp.nfclib.desfire.DESFireEV1File;
 import com.nxp.nfclib.interfaces.IKeyData;
 import com.nxp.nfclib.KeyType;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public class DesfireOperations {
 
@@ -18,211 +18,186 @@ public class DesfireOperations {
             (byte)0xD2,0x76,0x00,0x00,(byte)0x85,0x01,0x01
     };
 
-    public static final byte NDEF_CC_FILE_ID = 0x01;
-    public static final byte NDEF_DATA_FILE_ID = 0x02;
+    public static final byte CC_FILE_ID   = 0x01;
+    public static final byte NDEF_FILE_ID = 0x02;
 
     public static final int NDEF_FILE_SIZE = 256;
 
-    public static final byte[] DEFAULT_KEY = new byte[16];
+    private final IDESFireEV1 card;
 
-    private final DESFireEV3 card;
-
-    public DesfireOperations(DESFireEV3 card){
+    public DesfireOperations(IDESFireEV1 card){
         this.card = card;
     }
 
-    //────────────────────────────────────────
-    // AUTENTICACIÓN
-    //────────────────────────────────────────
+    // constructor vacío para pantallas que solo calculan offsets
+    public DesfireOperations(){}
 
-    public void authenticatePicc(byte[] key) throws Exception {
+    //────────────────────────────
+    // UTIL
+    //────────────────────────────
 
-        byte[] k = key != null ? key : DEFAULT_KEY;
-
-        IKeyData keyData = card.getKeyData(KeyType.AES128);
-        keyData.setKey(k);
-
-        card.authenticate(keyData,0,false, IDESFireEV1.AuthType.Native);
-
-        Log.d(TAG,"Autenticado en PICC");
+    public static String bytesToHex(byte[] data){
+        if(data==null) return "";
+        StringBuilder sb=new StringBuilder();
+        for(byte b:data) sb.append(String.format("%02X",b));
+        return sb.toString();
     }
 
-    private void authenticateApp(byte[] key,int keyNo) throws Exception {
-
-        byte[] k = key != null ? key : DEFAULT_KEY;
-
-        IKeyData keyData = card.getKeyData(KeyType.AES128);
-        keyData.setKey(k);
-
-        card.authenticate(keyData,keyNo,false,IDESFireEV1.AuthType.Native);
-    }
-
-    //────────────────────────────────────────
+    //────────────────────────────
     // CREAR APP NDEF
-    //────────────────────────────────────────
+    //────────────────────────────
 
-    public void createNdefApp(byte[] appMasterKey) throws Exception {
+    public void createNdefApp() throws Exception {
 
-        card.selectApplication(new byte[]{0x00,0x00,0x00});
-
-        authenticatePicc(null);
+        card.selectApplication(0);
 
         byte keySettings = 0x0F;
-        byte numberOfKeys = (byte)0x82;
+        byte numberOfKeys = 0x01;
 
-        card.createApplication(NDEF_AID,keySettings,numberOfKeys);
+        card.createApplication(0x010000,keySettings,numberOfKeys);
 
-        card.selectApplication(NDEF_AID);
+        card.selectApplication(0x010000);
 
-        authenticateApp(null,0);
+        createCapabilityContainer();
+        createNdefFile();
 
-        createCapabilityContainerFile();
-
-        createNdefDataFile();
-
-        Log.d(TAG,"Aplicación NDEF creada");
+        Log.d(TAG,"NDEF app creada");
     }
 
-    //────────────────────────────────────────
-    // CREAR CC FILE
-    //────────────────────────────────────────
+    private void createCapabilityContainer() throws Exception {
 
-    private void createCapabilityContainerFile() throws Exception {
-
-        byte readAccess = (byte)0xEE;
-        byte writeAccess = (byte)0x00;
-
-        DESFireEV3File.StdEV3DataFileSettings ccSettings =
-                new DESFireEV3File.StdEV3DataFileSettings(
+        DESFireEV1File.StdDataFileSettings settings =
+                new DESFireEV1File.StdDataFileSettings(
                         IDESFireEV1.CommunicationType.Plain,
-                        readAccess,
-                        readAccess,
-                        writeAccess,
-                        readAccess,
-                        15,
-                        false,
-                        null
+                        (byte)0xEE,(byte)0xEE,(byte)0x00,(byte)0xEE,
+                        15
                 );
 
-        card.createFile(NDEF_CC_FILE_ID,ccSettings);
+        card.createFile(CC_FILE_ID,settings);
 
-        byte[] cc = new byte[]{
+        byte[] cc=new byte[]{
                 0x00,0x0F,
                 0x20,
-                0x00,(byte)(NDEF_FILE_SIZE>>8),(byte)NDEF_FILE_SIZE,
+                0x00,0xFF,
+                0x00,0xFF,
+                0x04,0x06,
+                0x00,NDEF_FILE_ID,
                 0x00,(byte)0xFF,
-                0x04,
-                0x06,
-                0x00,NDEF_DATA_FILE_ID,
-                0x00,(byte)(NDEF_FILE_SIZE>>8),(byte)NDEF_FILE_SIZE,
                 0x00,
-                (byte)0x80
+                (byte)0xFF
         };
 
-        card.writeData(
-                NDEF_CC_FILE_ID,
-                0,
-                cc.length,
-                cc,
-                IDESFireEV1.CommunicationType.Plain
-        );
-
-        Log.d(TAG,"CC File creado");
+        card.writeData(CC_FILE_ID,0,cc.length,cc);
     }
 
-    //────────────────────────────────────────
-    // CREAR NDEF FILE
-    //────────────────────────────────────────
+    private void createNdefFile() throws Exception {
 
-    private void createNdefDataFile() throws Exception {
-
-        byte readAccess = (byte)0xEE;
-        byte writeAccess = (byte)0x00;
-
-        DESFireEV3File.StdEV3DataFileSettings ndefSettings =
-                new DESFireEV3File.StdEV3DataFileSettings(
+        DESFireEV1File.StdDataFileSettings settings =
+                new DESFireEV1File.StdDataFileSettings(
                         IDESFireEV1.CommunicationType.Plain,
-                        readAccess,
-                        readAccess,
-                        writeAccess,
-                        readAccess,
-                        NDEF_FILE_SIZE,
-                        false,
-                        null
+                        (byte)0xEE,(byte)0xEE,(byte)0x00,(byte)0xEE,
+                        NDEF_FILE_SIZE
                 );
 
-        card.createFile(NDEF_DATA_FILE_ID,ndefSettings);
-
-        Log.d(TAG,"NDEF file creado");
+        card.createFile(NDEF_FILE_ID,settings);
     }
 
-    //────────────────────────────────────────
-    // ESCRIBIR URL
-    //────────────────────────────────────────
+    //────────────────────────────
+    // ESCRIBIR NDEF URL
+    //────────────────────────────
 
     public void writeNdefUrl(String url) throws Exception {
 
-        byte[] ndefMessage = buildNdefUriMessage(url);
-
-        card.selectApplication(NDEF_AID);
-
-        authenticateApp(null,0);
+        byte[] ndef = buildUriRecord(url);
 
         card.writeData(
-                NDEF_DATA_FILE_ID,
+                NDEF_FILE_ID,
                 0,
-                ndefMessage.length,
-                ndefMessage,
-                IDESFireEV1.CommunicationType.Plain
+                ndef.length,
+                ndef
         );
 
-        Log.d(TAG,"NDEF escrito: "+url);
+        Log.d(TAG,"URL escrita: "+url);
     }
 
-    //────────────────────────────────────────
-    // CONSTRUIR NDEF URI
-    //────────────────────────────────────────
+    //────────────────────────────
+    // CONSTRUIR URI NDEF
+    //────────────────────────────
 
-    private byte[] buildNdefUriMessage(String url){
+    private byte[] buildUriRecord(String url){
 
-        byte uriIdentifier;
+        byte prefix;
         String payload;
 
         if(url.startsWith("https://")){
-            uriIdentifier = 0x04;
-            payload = url.substring(8);
-        }
-        else if(url.startsWith("http://")){
-            uriIdentifier = 0x03;
-            payload = url.substring(7);
-        }
-        else{
-            uriIdentifier = 0x00;
-            payload = url;
+            prefix=0x04;
+            payload=url.substring(8);
+        }else if(url.startsWith("http://")){
+            prefix=0x03;
+            payload=url.substring(7);
+        }else{
+            prefix=0x00;
+            payload=url;
         }
 
-        byte[] urlBytes = payload.getBytes(StandardCharsets.UTF_8);
+        byte[] urlBytes=payload.getBytes(StandardCharsets.UTF_8);
 
-        int payloadLen = 1 + urlBytes.length;
-
-        byte[] record = new byte[5 + urlBytes.length];
+        byte[] record=new byte[5+urlBytes.length];
 
         record[0]=(byte)0xD1;
         record[1]=0x01;
-        record[2]=(byte)payloadLen;
+        record[2]=(byte)(urlBytes.length+1);
         record[3]=0x55;
-        record[4]=uriIdentifier;
+        record[4]=prefix;
 
         System.arraycopy(urlBytes,0,record,5,urlBytes.length);
 
-        byte[] message = new byte[2 + record.length];
+        byte[] msg=new byte[record.length+2];
 
-        message[0]=(byte)((record.length>>8)&0xFF);
-        message[1]=(byte)(record.length&0xFF);
+        msg[0]=(byte)((record.length>>8)&0xFF);
+        msg[1]=(byte)(record.length&0xFF);
 
-        System.arraycopy(record,0,message,2,record.length);
+        System.arraycopy(record,0,msg,2,record.length);
 
-        return message;
+        return msg;
+    }
+
+    //────────────────────────────
+    // LECTURA NDEF
+    //────────────────────────────
+
+    public byte[] readNdefRaw() throws Exception {
+
+        return card.readData(
+                NDEF_FILE_ID,
+                0,
+                NDEF_FILE_SIZE
+        );
+    }
+
+    public String readNdefAsString() throws Exception {
+
+        byte[] raw = readNdefRaw();
+
+        if(raw.length<5) return "";
+
+        int len=((raw[0]&0xFF)<<8)|(raw[1]&0xFF);
+
+        byte[] rec= Arrays.copyOfRange(raw,2,2+len);
+
+        return new String(rec,StandardCharsets.UTF_8);
+    }
+
+    //────────────────────────────
+    // INFO TARJETA
+    //────────────────────────────
+
+    public IDESFireEV1.CardDetails readCardDetails() throws Exception{
+        return card.getCardDetails();
+    }
+
+    public int[] getApplicationIDs() throws Exception{
+        return card.getApplicationIDs();
     }
 
 }
