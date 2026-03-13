@@ -1,13 +1,12 @@
 package com.example.desfiresdm;
 
 import android.nfc.tech.IsoDep;
-
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 public class DesfireOperations {
 
-    public static final int NDEF_FILE_SIZE = 1024;
+    public static final int NDEF_FILE_ID = 0x04;
 
     private IsoDep isoDep;
 
@@ -17,18 +16,18 @@ public class DesfireOperations {
 
     public DesfireOperations(){}
 
-    /* ------------------------------------------------
-       UTILIDADES
-     ------------------------------------------------ */
+    /* --------------------------------------- */
+    /* UTILIDADES                              */
+    /* --------------------------------------- */
 
-    public static String bytesToHex(byte[] bytes) {
+    public static String bytesToHex(byte[] bytes){
 
-        if(bytes == null) return "";
+        if(bytes==null) return "";
 
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb=new StringBuilder();
 
-        for(byte b : bytes){
-            sb.append(String.format("%02X", b));
+        for(byte b:bytes){
+            sb.append(String.format("%02X",b));
         }
 
         return sb.toString();
@@ -36,41 +35,65 @@ public class DesfireOperations {
 
     private byte[] transceive(byte[] apdu) throws Exception{
 
-        byte[] resp = isoDep.transceive(apdu);
+        byte[] resp=isoDep.transceive(apdu);
 
-        if(resp.length < 2)
+        if(resp.length<2)
             throw new Exception("Respuesta inválida");
 
-        int sw1 = resp[resp.length-2] & 0xFF;
-        int sw2 = resp[resp.length-1] & 0xFF;
+        int sw1=resp[resp.length-2]&0xFF;
+        int sw2=resp[resp.length-1]&0xFF;
 
-        if(sw1 != 0x90 || sw2 != 0x00){
-            throw new Exception("APDU error: "+sw1+" "+sw2);
-        }
+        if(sw1!=0x90||sw2!=0x00)
+            throw new Exception("APDU error "+sw1+" "+sw2);
 
         return Arrays.copyOf(resp,resp.length-2);
     }
 
-    /* ------------------------------------------------
-       NDEF WRITE (IGUAL QUE PYTHON)
-     ------------------------------------------------ */
+    /* --------------------------------------- */
+    /* SELECT NDEF APPLICATION                 */
+    /* --------------------------------------- */
 
-    public void writeNdefUrl(IsoDep isoDep,String url) throws Exception{
+    private void selectNdefApplication() throws Exception{
 
-        this.isoDep = isoDep;
+        byte[] cmd=new byte[]{
+                0x00,(byte)0xA4,0x04,0x00,
+                0x07,
+                (byte)0xD2,0x76,0x00,0x00,(byte)0x85,0x01,0x01,
+                0x00
+        };
 
-        byte[] ndef = buildNdefUriMessage(url);
+        isoDep.transceive(cmd);
+    }
 
-        selectNdefApp();
+    private void selectNdefFile() throws Exception{
+
+        byte[] cmd=new byte[]{
+                0x00,(byte)0xA4,0x00,0x0C,
+                0x02,
+                (byte)0xE1,(byte)0x04
+        };
+
+        isoDep.transceive(cmd);
+    }
+
+    /* --------------------------------------- */
+    /* WRITE NDEF                              */
+    /* --------------------------------------- */
+
+    public void writeNdefUrl(String url) throws Exception{
+
+        byte[] ndef=buildNdefUriMessage(url);
+
+        selectNdefApplication();
         selectNdefFile();
 
-        int offset = 0;
+        int offset=0;
 
-        while(offset < ndef.length){
+        while(offset<ndef.length){
 
-            int chunk = Math.min(55, ndef.length-offset);
+            int chunk=Math.min(55,ndef.length-offset);
 
-            byte[] cmd = new byte[5+chunk];
+            byte[] cmd=new byte[5+chunk];
 
             cmd[0]=0x00;
             cmd[1]=(byte)0xD6;
@@ -86,28 +109,42 @@ public class DesfireOperations {
         }
     }
 
-    private void selectNdefApp() throws Exception{
+    /* --------------------------------------- */
+    /* READ NDEF                               */
+    /* --------------------------------------- */
 
-        byte[] cmd = new byte[]{
-                0x00,(byte)0xA4,0x04,0x00,
-                0x07,
-                (byte)0xD2,0x76,0x00,0x00,(byte)0x85,0x01,0x01,
-                0x00
+    public byte[] readNdefRaw() throws Exception{
+
+        selectNdefApplication();
+        selectNdefFile();
+
+        byte[] cmd=new byte[]{
+                0x00,(byte)0xB0,0x00,0x00,(byte)0xFF
         };
 
-        isoDep.transceive(cmd);
+        return transceive(cmd);
     }
 
-    private void selectNdefFile() throws Exception{
+    public String readNdefAsString() throws Exception{
 
-        byte[] cmd = new byte[]{
-                0x00,(byte)0xA4,0x00,0x0C,
-                0x02,
-                (byte)0xE1,(byte)0x04
-        };
+        byte[] raw=readNdefRaw();
 
-        isoDep.transceive(cmd);
+        if(raw.length<5)
+            return "";
+
+        int prefix=raw[4]&0xFF;
+
+        String body=new String(Arrays.copyOfRange(raw,5,raw.length));
+
+        if(prefix==0x04) return "https://"+body;
+        if(prefix==0x03) return "http://"+body;
+
+        return body;
     }
+
+    /* --------------------------------------- */
+    /* BUILD NDEF                              */
+    /* --------------------------------------- */
 
     private byte[] buildNdefUriMessage(String url){
 
@@ -127,9 +164,9 @@ public class DesfireOperations {
             body=url;
         }
 
-        byte[] urlBytes = body.getBytes(StandardCharsets.UTF_8);
+        byte[] urlBytes=body.getBytes(StandardCharsets.UTF_8);
 
-        byte[] record = new byte[5+urlBytes.length];
+        byte[] record=new byte[5+urlBytes.length];
 
         record[0]=(byte)0xD1;
         record[1]=0x01;
@@ -139,7 +176,7 @@ public class DesfireOperations {
 
         System.arraycopy(urlBytes,0,record,5,urlBytes.length);
 
-        byte[] msg = new byte[record.length+2];
+        byte[] msg=new byte[record.length+2];
 
         msg[0]=(byte)((record.length>>8)&0xFF);
         msg[1]=(byte)(record.length&0xFF);
@@ -149,79 +186,25 @@ public class DesfireOperations {
         return msg;
     }
 
-    /* ------------------------------------------------
-       LECTURA NDEF
-     ------------------------------------------------ */
+    /* --------------------------------------- */
+    /* SDM CONFIG                              */
+    /* --------------------------------------- */
 
-    public byte[] readNdefRaw() throws Exception{
+    public static void calculateSdmOffsets(String url,SdmConfig cfg){
 
-        selectNdefApp();
-        selectNdefFile();
+        int uid=url.indexOf("{UID}");
+        int ctr=url.indexOf("{CTR}");
+        int mac=url.indexOf("{MAC}");
 
-        byte[] cmd = new byte[]{
-                0x00,(byte)0xB0,0x00,0x00,(byte)0xFF
-        };
-
-        return transceive(cmd);
+        if(uid>=0) cfg.uidOffset=uid;
+        if(ctr>=0) cfg.counterOffset=ctr;
+        if(mac>=0) cfg.macOffset=mac;
     }
 
-    public String readNdefAsString() throws Exception{
+    public void configureSdm(SdmConfig cfg){
 
-        byte[] raw = readNdefRaw();
-
-        if(raw.length < 5)
-            return "";
-
-        int prefix = raw[4] & 0xFF;
-
-        String url = new String(Arrays.copyOfRange(raw,5,raw.length));
-
-        if(prefix==0x04) return "https://"+url;
-        if(prefix==0x03) return "http://"+url;
-
-        return url;
+        /* Aquí iría ChangeFileSettings EV3
+           offsets ya calculados en SdmConfigActivity */
     }
 
-    /* ------------------------------------------------
-       INFO TARJETA
-     ------------------------------------------------ */
-
-    public Object readCardDetails(){
-        return null;
-    }
-
-    public int[] getApplicationIDs(){
-        return new int[]{};
-    }
-
-    /* ------------------------------------------------
-       SDM CONFIG
-     ------------------------------------------------ */
-
-    public static void calculateSdmOffsets(String url,SdmConfig config){
-
-        int uidPos = url.indexOf("{UID}");
-        int ctrPos = url.indexOf("{CTR}");
-        int macPos = url.indexOf("{MAC}");
-
-        if(uidPos>=0) config.uidOffset = uidPos;
-        if(ctrPos>=0) config.counterOffset = ctrPos;
-        if(macPos>=0) config.macOffset = macPos;
-    }
-
-    public void configureSdm(SdmConfig config) throws Exception{
-
-        /*
-         Aquí se debería enviar el comando ChangeFileSettings EV3
-         con SDMOptions.
-
-         La estructura del proyecto ya lo soporta,
-         solo necesitas rellenar offsets en SdmConfigActivity.
-         */
-
-    }
-
-    public Object readSdmSettings(){
-        return null;
-    }
 }
