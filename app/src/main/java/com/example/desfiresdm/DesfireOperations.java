@@ -106,19 +106,54 @@ public class DesfireOperations {
     // ESCRIBIR NDEF URL
     //────────────────────────────
 
-    public void writeNdefUrl(String url) throws Exception {
+    public void writeNdefUrl(IsoDep isoDep, String url) throws Exception {
 
-        byte[] ndef = buildUriRecord(url);
-
-        card.writeData(
-                NDEF_FILE_ID,
-                0,
-                ndef.length,
-                ndef
-        );
-
-        Log.d(TAG,"URL escrita: "+url);
-    }
+        byte[] ndef = buildNdefUriMessage(url);
+    
+        // SELECT NDEF APP (ISO DF Name)
+        byte[] selectApp = new byte[]{
+            0x00,(byte)0xA4,0x04,0x00,
+            0x07,
+            (byte)0xD2,0x76,0x00,0x00,(byte)0x85,0x01,0x01,
+            0x00
+        };
+    
+        isoDep.transceive(selectApp);
+    
+        // SELECT NDEF FILE (E104)
+        byte[] selectFile = new byte[]{
+            0x00,(byte)0xA4,0x00,0x0C,
+            0x02,
+            (byte)0xE1,(byte)0x04
+        };
+    
+        isoDep.transceive(selectFile);
+    
+        int offset = 0;
+    
+        while(offset < ndef.length){
+    
+            int chunk = Math.min(55, ndef.length - offset);
+    
+            byte[] cmd = new byte[5 + chunk];
+    
+            cmd[0] = 0x00;
+            cmd[1] = (byte)0xD6;
+            cmd[2] = (byte)((offset >> 8) & 0xFF);
+            cmd[3] = (byte)(offset & 0xFF);
+            cmd[4] = (byte)chunk;
+    
+            System.arraycopy(ndef, offset, cmd, 5, chunk);
+    
+            byte[] resp = isoDep.transceive(cmd);
+    
+            if(resp[resp.length-2] != (byte)0x90 || resp[resp.length-1] != 0x00){
+                throw new Exception("Error escribiendo NDEF");
+            }
+    
+            offset += chunk;
+        }
+    } 
 
     //────────────────────────────
     // CONSTRUIR URI NDEF
