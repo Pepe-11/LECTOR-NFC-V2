@@ -35,28 +35,12 @@
         android:layout_height="wrap_content"
         android:text="📋 Insertar placeholder SDM..."
         android:backgroundTint="@color/button_secondary"
-        android:layout_marginBottom="16dp" />
-
-    <!-- Opciones adicionales -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Opciones"
-        android:textStyle="bold"
-        android:textSize="15sp"
         android:layout_marginBottom="8dp" />
 
-    <CheckBox
-        android:id="@+id/switch_create_app"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Crear aplicación NDEF si no existe"
-        android:layout_marginBottom="4dp" />
-
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Clave maestra de la app (hex, dejar vacío para clave por defecto)"
+        android:text="Clave maestra de la app (hex, dejar vacío = clave por defecto)"
         android:textSize="12sp"
         android:textColor="@color/text_secondary"
         android:layout_marginBottom="4dp" />
@@ -65,13 +49,12 @@
         android:id="@+id/et_app_key"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="00000000000000000000000000000000 (16 bytes)"
+        android:hint="00000000000000000000000000000000 (16 bytes AES)"
         android:inputType="textNoSuggestions"
         android:fontFamily="monospace"
         android:textSize="12sp"
         android:layout_marginBottom="16dp" />
 
-    <!-- Botones de acción -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
