@@ -6,56 +6,45 @@ import java.util.Arrays;
 
 public class DesfireOperations {
 
-    public static final int NDEF_FILE_ID = 0x04;
-
     private IsoDep isoDep;
+
+    public static final byte[] NDEF_AID =
+            {(byte)0xD2,0x76,0x00,0x00,(byte)0x85,0x01,0x01};
+
+    public static final byte[] NDEF_FILE =
+            {(byte)0xE1,(byte)0x04};
 
     public DesfireOperations(IsoDep isoDep){
         this.isoDep = isoDep;
     }
 
-    public DesfireOperations(){}
-
-    /* --------------------------------------- */
-    /* UTILIDADES                              */
-    /* --------------------------------------- */
-
-    public static String bytesToHex(byte[] bytes){
-
-        if(bytes==null) return "";
-
-        StringBuilder sb=new StringBuilder();
-
-        for(byte b:bytes){
-            sb.append(String.format("%02X",b));
-        }
-
-        return sb.toString();
-    }
+    /* ------------------------------------------------ */
+    /* APDU HELPER                                       */
+    /* ------------------------------------------------ */
 
     private byte[] transceive(byte[] apdu) throws Exception{
 
-        byte[] resp=isoDep.transceive(apdu);
+        byte[] resp = isoDep.transceive(apdu);
 
-        if(resp.length<2)
-            throw new Exception("Respuesta inválida");
+        if(resp.length < 2)
+            throw new Exception("Invalid response");
 
-        int sw1=resp[resp.length-2]&0xFF;
-        int sw2=resp[resp.length-1]&0xFF;
+        int sw1 = resp[resp.length-2] & 0xFF;
+        int sw2 = resp[resp.length-1] & 0xFF;
 
-        if(sw1!=0x90||sw2!=0x00)
+        if(sw1 != 0x90 || sw2 != 0x00)
             throw new Exception("APDU error "+sw1+" "+sw2);
 
         return Arrays.copyOf(resp,resp.length-2);
     }
 
-    /* --------------------------------------- */
-    /* SELECT NDEF APPLICATION                 */
-    /* --------------------------------------- */
+    /* ------------------------------------------------ */
+    /* SELECT NDEF APP                                   */
+    /* ------------------------------------------------ */
 
-    private void selectNdefApplication() throws Exception{
+    public void selectNdefApplication() throws Exception{
 
-        byte[] cmd=new byte[]{
+        byte[] cmd = new byte[]{
                 0x00,(byte)0xA4,0x04,0x00,
                 0x07,
                 (byte)0xD2,0x76,0x00,0x00,(byte)0x85,0x01,0x01,
@@ -65,9 +54,9 @@ public class DesfireOperations {
         isoDep.transceive(cmd);
     }
 
-    private void selectNdefFile() throws Exception{
+    public void selectNdefFile() throws Exception{
 
-        byte[] cmd=new byte[]{
+        byte[] cmd = new byte[]{
                 0x00,(byte)0xA4,0x00,0x0C,
                 0x02,
                 (byte)0xE1,(byte)0x04
@@ -76,135 +65,166 @@ public class DesfireOperations {
         isoDep.transceive(cmd);
     }
 
-    /* --------------------------------------- */
-    /* WRITE NDEF                              */
-    /* --------------------------------------- */
+    /* ------------------------------------------------ */
+    /* CREATE NDEF STRUCTURE                             */
+    /* ------------------------------------------------ */
 
-    public void writeNdefUrl(String url) throws Exception{
+    public void createNdefApplication() throws Exception{
 
-        byte[] ndef=buildNdefUriMessage(url);
-
-        selectNdefApplication();
-        selectNdefFile();
-
-        int offset=0;
-
-        while(offset<ndef.length){
-
-            int chunk=Math.min(55,ndef.length-offset);
-
-            byte[] cmd=new byte[5+chunk];
-
-            cmd[0]=0x00;
-            cmd[1]=(byte)0xD6;
-            cmd[2]=(byte)((offset>>8)&0xFF);
-            cmd[3]=(byte)(offset&0xFF);
-            cmd[4]=(byte)chunk;
-
-            System.arraycopy(ndef,offset,cmd,5,chunk);
-
-            transceive(cmd);
-
-            offset+=chunk;
-        }
-    }
-
-    /* --------------------------------------- */
-    /* READ NDEF                               */
-    /* --------------------------------------- */
-
-    public byte[] readNdefRaw() throws Exception{
-
-        selectNdefApplication();
-        selectNdefFile();
-
-        byte[] cmd=new byte[]{
-                0x00,(byte)0xB0,0x00,0x00,(byte)0xFF
+        byte[] apdu = new byte[]{
+                (byte)0x90,0xCA,0x00,0x00,
+                0x05,
+                0x01,0x00,0x00,
+                0x0F,0x01,
+                0x00
         };
 
-        return transceive(cmd);
+        isoDep.transceive(apdu);
     }
 
-    public String readNdefAsString() throws Exception{
+    public void createNdefFile() throws Exception{
 
-        byte[] raw=readNdefRaw();
+        byte[] apdu = new byte[]{
+                (byte)0x90,(byte)0xCD,0x00,0x00,
+                0x07,
+                0x02,
+                0x00,0x00,
+                (byte)0xEE,
+                0x00,0x00,
+                (byte)0xFF,
+                0x00
+        };
 
-        if(raw.length<5)
-            return "";
-
-        int prefix=raw[4]&0xFF;
-
-        String body=new String(Arrays.copyOfRange(raw,5,raw.length));
-
-        if(prefix==0x04) return "https://"+body;
-        if(prefix==0x03) return "http://"+body;
-
-        return body;
+        isoDep.transceive(apdu);
     }
 
-    /* --------------------------------------- */
-    /* BUILD NDEF                              */
-    /* --------------------------------------- */
+    /* ------------------------------------------------ */
+    /* BUILD NDEF URL                                    */
+    /* ------------------------------------------------ */
 
-    private byte[] buildNdefUriMessage(String url){
+    private byte[] buildNdefUri(String url){
 
         byte prefix;
         String body;
 
         if(url.startsWith("https://")){
-            prefix=0x04;
-            body=url.substring(8);
+            prefix = 0x04;
+            body = url.substring(8);
         }
         else if(url.startsWith("http://")){
-            prefix=0x03;
-            body=url.substring(7);
+            prefix = 0x03;
+            body = url.substring(7);
         }
         else{
-            prefix=0x00;
-            body=url;
+            prefix = 0x00;
+            body = url;
         }
 
-        byte[] urlBytes=body.getBytes(StandardCharsets.UTF_8);
+        byte[] urlBytes = body.getBytes(StandardCharsets.UTF_8);
 
-        byte[] record=new byte[5+urlBytes.length];
+        byte[] record = new byte[5 + urlBytes.length];
 
-        record[0]=(byte)0xD1;
-        record[1]=0x01;
-        record[2]=(byte)(urlBytes.length+1);
-        record[3]=0x55;
-        record[4]=prefix;
+        record[0] = (byte)0xD1;
+        record[1] = 0x01;
+        record[2] = (byte)(urlBytes.length + 1);
+        record[3] = 0x55;
+        record[4] = prefix;
 
         System.arraycopy(urlBytes,0,record,5,urlBytes.length);
 
-        byte[] msg=new byte[record.length+2];
+        byte[] msg = new byte[record.length + 2];
 
-        msg[0]=(byte)((record.length>>8)&0xFF);
-        msg[1]=(byte)(record.length&0xFF);
+        msg[0] = (byte)((record.length >> 8) & 0xFF);
+        msg[1] = (byte)(record.length & 0xFF);
 
         System.arraycopy(record,0,msg,2,record.length);
 
         return msg;
     }
 
-    /* --------------------------------------- */
-    /* SDM CONFIG                              */
-    /* --------------------------------------- */
+    /* ------------------------------------------------ */
+    /* WRITE NDEF                                        */
+    /* ------------------------------------------------ */
 
-    public static void calculateSdmOffsets(String url,SdmConfig cfg){
+    public void writeNdefUrl(String url) throws Exception{
 
-        int uid=url.indexOf("{UID}");
-        int ctr=url.indexOf("{CTR}");
-        int mac=url.indexOf("{MAC}");
+        selectNdefApplication();
+        selectNdefFile();
 
-        if(uid>=0) cfg.uidOffset=uid;
-        if(ctr>=0) cfg.counterOffset=ctr;
-        if(mac>=0) cfg.macOffset=mac;
+        byte[] ndef = buildNdefUri(url);
+
+        int offset = 0;
+
+        while(offset < ndef.length){
+
+            int chunk = Math.min(50,ndef.length-offset);
+
+            byte[] cmd = new byte[5 + chunk];
+
+            cmd[0] = 0x00;
+            cmd[1] = (byte)0xD6;
+            cmd[2] = (byte)((offset >> 8) & 0xFF);
+            cmd[3] = (byte)(offset & 0xFF);
+            cmd[4] = (byte)chunk;
+
+            System.arraycopy(ndef,offset,cmd,5,chunk);
+
+            transceive(cmd);
+
+            offset += chunk;
+        }
     }
 
-    public void configureSdm(SdmConfig cfg){
+    /* ------------------------------------------------ */
+    /* CONFIGURE SDM                                     */
+    /* ------------------------------------------------ */
 
-        /* Aquí iría ChangeFileSettings EV3
-           offsets ya calculados en SdmConfigActivity */
+    public void configureSdm(SdmConfig cfg) throws Exception{
+
+        byte sdmOptions = 0x01;
+        byte sdmAccess = 0x0F;
+
+        byte[] cmd = new byte[]{
+                (byte)0x90,0x5F,0x00,0x00,
+                0x0B,
+                0x02,
+                sdmOptions,
+                sdmAccess,
+                (byte)cfg.uidOffset,
+                (byte)cfg.counterOffset,
+                (byte)cfg.macOffset,
+                0x00,0x00,0x00,
+                0x00
+        };
+
+        isoDep.transceive(cmd);
     }
 
+    /* ------------------------------------------------ */
+    /* READ NDEF                                         */
+    /* ------------------------------------------------ */
+
+    public String readNdef() throws Exception{
+
+        selectNdefApplication();
+        selectNdefFile();
+
+        byte[] cmd = new byte[]{
+                0x00,(byte)0xB0,0x00,0x00,(byte)0xFF
+        };
+
+        byte[] data = transceive(cmd);
+
+        if(data.length < 5)
+            return "";
+
+        int prefix = data[4] & 0xFF;
+
+        String body = new String(Arrays.copyOfRange(data,5,data.length));
+
+        if(prefix==0x04) return "https://"+body;
+        if(prefix==0x03) return "http://"+body;
+
+        return body;
+    }
 }
